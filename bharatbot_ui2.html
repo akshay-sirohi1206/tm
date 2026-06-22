@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BharatBot — Multilingual Voice Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600&family=Noto+Sans+Devanagari:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        #0d0f12;
+    --surface:   #13161b;
+    --panel:     #181c22;
+    --border:    rgba(255,255,255,0.07);
+    --border-md: rgba(255,255,255,0.13);
+    --accent:    #f97316;
+    --accent2:   #fb923c;
+    --user-bubble: #1e2430;
+    --bot-bubble:  #1a2a1e;
+    --text:      #e8e9eb;
+    --muted:     #6b7280;
+    --muted2:    #4b5563;
+    --danger:    #ef4444;
+    --success:   #22c55e;
+    --tag-en:    #1e3a5f;
+    --tag-hi:    #2d1b4e;
+    --tag-mr:    #1a3d2b;
+    --tag-voice: #3d1f0a;
+    --font:      'Sora', sans-serif;
+    --font-dev:  'Noto Sans Devanagari', sans-serif;
+    --r:         12px;
+    --r-sm:      8px;
+    --sidebar:   280px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.6;
+    overflow: hidden;
+  }
+
+  .app { display: flex; height: 100vh; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: var(--sidebar);
+    min-width: var(--sidebar);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-header {
+    padding: 20px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .logo { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+
+  .logo-mark {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--accent), #c2410c);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 600; color: #fff;
+    flex-shrink: 0;
+  }
+
+  .logo-text { font-size: 16px; font-weight: 600; letter-spacing: -0.3px; }
+  .logo-sub  { font-size: 10px; color: var(--muted); letter-spacing: 0.8px; text-transform: uppercase; }
+
+  .new-session-btn {
+    width: 100%;
+    padding: 9px 14px;
+    background: var(--accent);
+    border: none; border-radius: var(--r-sm);
+    color: #fff; font-family: var(--font); font-size: 13px; font-weight: 500;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .new-session-btn:hover  { background: var(--accent2); }
+  .new-session-btn:active { transform: scale(0.97); }
+
+  .sessions-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .sessions-list::-webkit-scrollbar { width: 4px; }
+  .sessions-list::-webkit-scrollbar-track { background: transparent; }
+  .sessions-list::-webkit-scrollbar-thumb { background: var(--muted2); border-radius: 4px; }
+
+  .session-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+    position: relative;
+  }
+  .session-item:hover { background: rgba(255,255,255,0.04); }
+  .session-item.active { background: rgba(249,115,22,0.08); border-left-color: var(--accent); }
+
+  .session-title {
+    font-size: 13px; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 200px; color: var(--text);
+  }
+  .session-meta {
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  .session-del {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--muted2); cursor: pointer;
+    font-size: 14px; padding: 4px; border-radius: 4px;
+    opacity: 0; transition: opacity 0.12s, color 0.12s;
+  }
+  .session-item:hover .session-del { opacity: 1; }
+  .session-del:hover { color: var(--danger); }
+
+  .sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+    flex-shrink: 0;
+  }
+  .lang-chips { display: flex; gap: 5px; margin-top: 6px; flex-wrap: wrap; }
+  .lang-chip {
+    padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 500; border: 1px solid;
+  }
+  .lang-chip.en { background: var(--tag-en); border-color: #2563eb44; color: #93c5fd; }
+  .lang-chip.hi { background: var(--tag-hi); border-color: #7c3aed44; color: #c4b5fd; font-family: var(--font-dev); }
+  .lang-chip.mr { background: var(--tag-mr); border-color: #16a34a44; color: #86efac; font-family: var(--font-dev); }
+
+  /* ── Main chat area ── */
+  .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+
+  .chat-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .chat-header-info { flex: 1; min-width: 0; }
+  .chat-title { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-subtitle { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .lang-badge-strip { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .lang-badge {
+    padding: 1px 7px; border-radius: 20px; font-size: 10px; font-weight: 600;
+    border: 1px solid; letter-spacing: 0.3px;
+  }
+  .lang-badge.en  { background: var(--tag-en); border-color: #2563eb55; color: #93c5fd; }
+  .lang-badge.hi  { background: var(--tag-hi); border-color: #7c3aed55; color: #c4b5fd; font-family: var(--font-dev); }
+  .lang-badge.mr  { background: var(--tag-mr); border-color: #16a34a55; color: #86efac; font-family: var(--font-dev); }
+  .lang-badge.dom { outline: 1px solid currentColor; outline-offset: 1px; }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--success); flex-shrink: 0;
+    box-shadow: 0 0 6px var(--success);
+  }
+
+  .ws-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    flex-shrink: 0; cursor: help;
+    transition: background .3s, box-shadow .3s;
+  }
+  .ws-dot.connected    { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  .ws-dot.disconnected { background: var(--muted2); }
+  .ws-dot.error        { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
+
+  /* ── Messages ── */
+  .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+  .messages::-webkit-scrollbar { width: 4px; }
+  .messages::-webkit-scrollbar-thumb { background: var(--muted2); border-radius: 4px; }
+
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; color: var(--muted); gap: 12px; text-align: center;
+  }
+  .empty-icon {
+    width: 60px; height: 60px; border: 1px solid var(--border-md);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px;
+  }
+  .empty-state h3 { font-size: 16px; font-weight: 500; color: var(--text); }
+  .empty-state p  { font-size: 13px; max-width: 260px; line-height: 1.7; }
+
+  .msg-row { display: flex; gap: 10px; animation: fadeUp 0.25s ease both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .msg-row.user { flex-direction: row-reverse; }
+
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; margin-top: 2px;
+  }
+  .avatar.user { background: var(--accent); color: #fff; }
+  .avatar.bot  { background: #1e2d1e; color: #86efac; border: 1px solid #22c55e33; }
+
+  .bubble {
+    max-width: 68%; padding: 11px 15px; border-radius: var(--r);
+    font-size: 14px; line-height: 1.65; position: relative;
+  }
+  .bubble.user { background: var(--user-bubble); border: 1px solid rgba(249,115,22,0.15); border-top-right-radius: 3px; }
+  .bubble.bot  { background: var(--bot-bubble);  border: 1px solid rgba(34,197,94,0.12);  border-top-left-radius: 3px; }
+  .bubble.loading { display: flex; align-items: center; gap: 5px; padding: 13px 18px; }
+
+  .bubble-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; flex-wrap: wrap; }
+  .bubble-tag {
+    font-size: 10px; padding: 1px 7px; border-radius: 20px; font-weight: 500; border: 1px solid;
+  }
+  .bubble-tag.en    { background: var(--tag-en); border-color: #2563eb33; color: #93c5fd; }
+  .bubble-tag.hi    { background: var(--tag-hi); border-color: #7c3aed33; color: #c4b5fd; font-family: var(--font-dev); }
+  .bubble-tag.mr    { background: var(--tag-mr); border-color: #16a34a33; color: #86efac; font-family: var(--font-dev); }
+  .bubble-tag.voice { background: var(--tag-voice); border-color: #ea580c33; color: #fdba74; }
+  .bubble-tag.mixed { background: #1e1e3a; border-color: #6366f133; color: #a5b4fc; font-size: 9px; letter-spacing: 0.5px; }
+
+  .bubble-text { color: var(--text); }
+  .bubble-text.devanagari { font-family: var(--font-dev); font-size: 15px; }
+  .bubble-time { font-size: 10px; color: var(--muted); margin-top: 5px; }
+
+  /* ── Audio player ── */
+  .audio-player {
+    margin-top: 8px; display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; background: rgba(255,255,255,0.04); border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+  }
+  .play-btn {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: background 0.12s;
+  }
+  .play-btn:hover   { background: var(--accent2); }
+  .play-btn:disabled { background: var(--muted2); cursor: not-allowed; }
+  .play-btn svg { width: 12px; height: 12px; fill: #fff; }
+  .audio-label { font-size: 11px; color: var(--muted); flex: 1; }
+
+  /* Load / Regenerate audio button shown on history bubbles */
+  .load-audio-btn {
+    margin-top: 8px; display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; background: rgba(255,255,255,0.03);
+    border-radius: var(--r-sm); border: 1px dashed var(--border-md);
+    cursor: pointer; font-size: 11px; color: var(--muted); font-family: var(--font);
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .load-audio-btn:hover   { border-color: var(--accent); color: var(--accent); }
+  .load-audio-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .load-audio-btn.busy    { color: var(--muted2); border-color: var(--border); cursor: wait; }
+
+  /* Loading dots */
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: bounce 1.2s infinite; }
+  .dot:nth-child(2) { animation-delay: 0.2s; }
+  .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-6px); opacity: 1; } }
+
+  /* ── Input bar ── */
+  .input-bar { padding: 16px 24px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+
+  .input-wrap {
+    display: flex; align-items: flex-end; gap: 10px;
+    background: var(--panel); border: 1px solid var(--border-md);
+    border-radius: var(--r); padding: 10px 12px; transition: border-color 0.15s;
+  }
+  .input-wrap:focus-within { border-color: rgba(249,115,22,0.4); }
+
+  #text-input {
+    flex: 1; background: none; border: none; outline: none;
+    color: var(--text); font-family: var(--font); font-size: 14px;
+    resize: none; min-height: 22px; max-height: 120px; line-height: 1.5;
+  }
+  #text-input::placeholder { color: var(--muted2); }
+
+  .input-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+  .mic-btn {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: var(--panel); border: 1px solid var(--border-md);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s; flex-shrink: 0;
+  }
+  .mic-btn:hover { border-color: var(--accent); background: rgba(249,115,22,0.08); }
+  .mic-btn svg { width: 16px; height: 16px; fill: var(--muted); transition: fill 0.15s; }
+  .mic-btn:hover svg { fill: var(--accent); }
+  .mic-btn.recording { background: rgba(239,68,68,0.15); border-color: var(--danger); animation: pulse-ring 1.5s infinite; }
+  .mic-btn.recording svg { fill: var(--danger); }
+  @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 70% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
+
+  .send-btn {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: var(--accent); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, transform 0.1s; flex-shrink: 0;
+  }
+  .send-btn:hover { background: var(--accent2); }
+  .send-btn:active { transform: scale(0.93); }
+  .send-btn:disabled { background: var(--muted2); cursor: not-allowed; transform: none; }
+  .send-btn svg { width: 16px; height: 16px; fill: #fff; }
+
+  .rec-banner {
+    display: none; align-items: center; justify-content: center; gap: 8px;
+    padding: 7px; background: rgba(239,68,68,0.08);
+    border-radius: var(--r-sm); color: #fca5a5; font-size: 12px;
+    margin-bottom: 8px; border: 1px solid rgba(239,68,68,0.2);
+  }
+  .rec-banner.active { display: flex; }
+  .rec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); animation: blink 1s infinite; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+  .rec-timer { font-weight: 500; min-width: 36px; }
+
+  .input-hints { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .hint-chip {
+    padding: 4px 10px; border-radius: 20px;
+    background: var(--panel); border: 1px solid var(--border-md);
+    font-size: 11px; color: var(--muted); cursor: pointer; transition: all 0.12s;
+  }
+  .hint-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #1e2430; border: 1px solid var(--border-md);
+    padding: 10px 18px; border-radius: var(--r-sm);
+    font-size: 13px; color: var(--text);
+    opacity: 0; transition: all 0.25s; pointer-events: none; z-index: 100; white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── No session ── */
+  .no-session {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 14px; color: var(--muted); text-align: center; padding: 24px;
+  }
+  .no-session h2 { font-size: 18px; font-weight: 500; color: var(--text); }
+  .no-session p  { font-size: 13px; max-width: 280px; line-height: 1.8; }
+  .start-btn {
+    padding: 10px 22px; background: var(--accent); border: none; border-radius: var(--r-sm);
+    color: #fff; font-family: var(--font); font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .start-btn:hover { background: var(--accent2); }
+
+  /* ── Auth Modal ── */
+  .auth-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex;
+    align-items: center; justify-content: center; z-index: 1000;
+  }
+  .auth-modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 32px 28px; width: 90%; max-width: 420px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .auth-modal h1 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+  .auth-modal p { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+  .form-group input {
+    width: 100%; padding: 10px 12px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--r-sm); color: var(--text); font-family: var(--font); font-size: 13px;
+    transition: border-color 0.15s;
+  }
+  .form-group input:focus { outline: none; border-color: var(--accent); }
+  .form-group.error input { border-color: var(--danger); }
+  .form-error { font-size: 11px; color: var(--danger); margin-top: 4px; }
+  .form-submit {
+    width: 100%; padding: 11px; background: var(--accent); border: none;
+    border-radius: var(--r-sm); color: #fff; font-family: var(--font); font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: background 0.15s; margin-top: 16px;
+  }
+  .form-submit:hover { background: var(--accent2); }
+  .form-submit:disabled { background: var(--muted2); cursor: not-allowed; }
+  .form-toggle { font-size: 12px; color: var(--muted); text-align: center; margin-top: 16px; }
+  .form-toggle button { background: none; border: none; color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .form-toggle button:hover { color: var(--accent2); }
+
+  /* ── User Profile in Header ── */
+  .user-profile-btn {
+    background: none; border: none; cursor: pointer;
+    display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+    border-radius: var(--r-sm); transition: background 0.15s;
+  }
+  .user-profile-btn:hover { background: rgba(255,255,255,0.05); }
+  .user-avatar-mini {
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff;
+  }
+  .user-name { font-size: 12px; color: var(--text); }
+  .user-menu {
+    position: absolute; top: 100%; right: 0; background: var(--panel);
+    border: 1px solid var(--border); border-radius: var(--r-sm); min-width: 180px;
+    margin-top: 8px; z-index: 200; overflow: hidden;
+  }
+  .user-menu button {
+    width: 100%; text-align: left; padding: 10px 12px; border: none;
+    background: none; cursor: pointer; font-size: 12px; color: var(--text);
+    font-family: var(--font); transition: background 0.12s;
+  }
+  .user-menu button:hover { background: rgba(255,255,255,0.08); }
+  .user-menu .divider { height: 1px; background: var(--border); }
+  .user-menu button.logout { color: var(--danger); }
+
+  * { scrollbar-width: thin; scrollbar-color: var(--muted2) transparent; }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ════════════ SIDEBAR ════════════ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-mark">भ</div>
+        <div>
+          <div class="logo-text">BharatBot</div>
+          <div class="logo-sub">Multilingual AI</div>
+        </div>
+      </div>
+      <button class="new-session-btn" onclick="createSession()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New conversation
+      </button>
+    </div>
+
+    <div class="sessions-list" id="sessions-list"></div>
+
+    <div class="sidebar-footer">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <div>Supported languages</div>
+        <button class="user-profile-btn" onclick="toggleUserMenu()" id="user-profile-btn" style="display:none;position:relative;">
+          <div class="user-avatar-mini" id="user-avatar-mini">?</div>
+          <div class="user-menu" id="user-menu" style="display:none;">
+            <button onclick="goToProfileModal()">👤 Profile</button>
+            <button onclick="goToChangePasswordModal()">🔐 Change password</button>
+            <div class="divider"></div>
+            <button class="logout" onclick="handleLogout()">🚪 Logout</button>
+          </div>
+        </button>
+      </div>
+      <div class="lang-chips">
+        <span class="lang-chip en">English</span>
+        <span class="lang-chip hi">हिंदी</span>
+        <span class="lang-chip mr">मराठी</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ════════════ CHAT AREA ════════════ -->
+  <main class="chat-area" id="chat-area">
+
+    <div class="no-session" id="no-session-state">
+      <div class="empty-icon">🎙️</div>
+      <h2>Start a conversation</h2>
+      <p>Create a new session or select one from the left. You can speak or type in English, हिंदी, or मराठी — even mix them.</p>
+      <button class="start-btn" onclick="createSession()">+ New conversation</button>
+    </div>
+
+    <div id="active-chat" style="display:none; flex-direction:column; height:100%;">
+
+      <div class="chat-header">
+        <div class="status-dot" id="status-dot"></div>
+        <div class="chat-header-info">
+          <div class="chat-title" id="chat-title">Conversation</div>
+          <div class="lang-badge-strip" id="lang-badge-strip"></div>
+          <div class="chat-subtitle" id="chat-subtitle">Text &amp; voice · EN / HI / MR</div>
+        </div>
+        <div class="ws-dot disconnected" id="ws-dot" title="Connecting…"></div>
+      </div>
+
+      <div class="messages" id="messages-pane"></div>
+
+      <div class="input-bar">
+        <div class="input-hints" id="hint-chips">
+          <span class="hint-chip" onclick="insertHint('नमस्ते! आप कैसे हैं?')">नमस्ते 👋</span>
+          <span class="hint-chip" onclick="insertHint('मला मदत हवी आहे.')">मराठीत बोला</span>
+          <span class="hint-chip" onclick="insertHint('Tell me something interesting.')">Something interesting</span>
+          <span class="hint-chip" onclick="insertHint('kal main office गया and met the client.')">Hinglish mix</span>
+        </div>
+        <div class="rec-banner" id="rec-banner">
+          <div class="rec-dot"></div>
+          <span>Recording</span>
+          <span class="rec-timer" id="rec-timer">0:00</span>
+          <span style="color:var(--muted);font-size:11px;margin-left:4px">— click mic to stop</span>
+        </div>
+        <div class="input-wrap">
+          <textarea id="text-input" placeholder="Type in English, हिंदी, or मराठी…" rows="1"
+            onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+          <div class="input-actions">
+            <button class="mic-btn" id="mic-btn" onclick="toggleRecording()" title="Click to record voice">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v7a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-7 8a1 1 0 0 1 1 1 6 6 0 0 0 12 0 1 1 0 0 1 2 0 8 8 0 0 1-7 7.93V22h3a1 1 0 0 1 0 2H8a1 1 0 0 1 0-2h3v-2.07A8 8 0 0 1 4 12a1 1 0 0 1 1-1z"/>
+              </svg>
+            </button>
+            <button class="send-btn" id="send-btn" onclick="sendText()" disabled>
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+</div>
+
+<!-- ════════════ AUTH MODAL ════════════ -->
+<div class="auth-overlay" id="auth-overlay" style="display:none;">
+  <div class="auth-modal">
+    <h1 id="auth-title">Sign In</h1>
+    <p id="auth-subtitle">Welcome back to BharatBot</p>
+    <form id="auth-form" onsubmit="handleAuthSubmit(event)">
+      <div id="auth-name-group" class="form-group" style="display:none;">
+        <label>Name</label>
+        <input type="text" id="auth-name" placeholder="Your name">
+        <div class="form-error" id="auth-name-error"></div>
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="auth-email" placeholder="your@email.com">
+        <div class="form-error" id="auth-email-error"></div>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="auth-password" placeholder="••••••••">
+        <div class="form-error" id="auth-password-error"></div>
+      </div>
+      <div id="auth-password-policy" style="display:none; font-size:11px; color:var(--muted); margin-bottom:16px; line-height:1.6;">
+        <strong>Password must have:</strong><br>
+        ✓ 8+ characters<br>
+        ✓ Uppercase letter (A-Z)<br>
+        ✓ Lowercase letter (a-z)<br>
+        ✓ Digit (0-9)<br>
+        ✓ Special character (!@#$%&*)<br>
+        ✓ Not your email or name
+      </div>
+      <button type="submit" class="form-submit" id="auth-submit-btn">Sign In</button>
+      <div class="form-toggle">
+        <span id="auth-toggle-text">Don't have an account?</span>
+        <button type="button" id="auth-toggle-btn" onclick="toggleAuthMode(event)">Sign up</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════ PROFILE/PASSWORD MODAL ════════════ -->
+<div class="auth-overlay" id="profile-overlay" style="display:none;">
+  <div class="auth-modal">
+    <h1 id="profile-title">Your Profile</h1>
+    <form id="profile-form" onsubmit="handleProfileSubmit(event)">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="profile-name" placeholder="Your name">
+        <div class="form-error" id="profile-name-error"></div>
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="profile-email" disabled placeholder="your@email.com">
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">Email cannot be changed</div>
+      </div>
+      <button type="button" class="form-submit" onclick="goToChangePasswordModal()">🔐 Change Password</button>
+      <button type="button" class="form-submit" style="background:var(--danger); margin-top:8px;" onclick="closeProfileModal()">Close</button>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════ CHANGE PASSWORD MODAL ════════════ -->
+<div class="auth-overlay" id="change-password-overlay" style="display:none;">
+  <div class="auth-modal">
+    <h1>Change Password</h1>
+    <form id="change-password-form" onsubmit="handleChangePasswordSubmit(event)">
+      <div class="form-group">
+        <label>Current Password</label>
+        <input type="password" id="current-password" placeholder="••••••••">
+        <div class="form-error" id="current-password-error"></div>
+      </div>
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="password" id="new-password" placeholder="••••••••">
+        <div class="form-error" id="new-password-error"></div>
+      </div>
+      <div class="form-group">
+        <label>Confirm Password</label>
+        <input type="password" id="confirm-password" placeholder="••••••••">
+        <div class="form-error" id="confirm-password-error"></div>
+      </div>
+      <div id="change-password-policy" style="font-size:11px; color:var(--muted); margin-bottom:16px; line-height:1.6;">
+        <strong>Password must have:</strong><br>
+        ✓ 8+ characters ✓ Uppercase ✓ Lowercase ✓ Digit ✓ Special char
+      </div>
+      <button type="submit" class="form-submit">Change Password</button>
+      <button type="button" class="form-submit" style="background:var(--muted2); margin-top:8px;" onclick="closeChangePasswordModal()">Cancel</button>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';  // Set to your FastAPI base URL e.g. 'http://localhost:8000'
+
+// ── Auth State ──────────────────────────────────────────────────────────────
+let accessToken   = localStorage.getItem('access_token') || null;
+let refreshToken  = localStorage.getItem('refresh_token') || null;
+let currentUser   = null;
+
+// ── App State ───────────────────────────────────────────────────────────────
+let sessions        = [];
+let activeSessionId = null;
+let recInterval     = null;
+let recSeconds      = 0;
+let isBusy          = false;
+let currentAudio    = null;
+const audioCache    = {};
+
+// ── WebSocket state ────────────────────────────────────────────────────────
+let ws               = null;   // active WebSocket
+let wsSessionId      = null;   // session the WS is bound to
+
+// ── Token Refresh Helper ────────────────────────────────────────────────────
+async function refreshAccessToken() {
+  if (!refreshToken) throw new Error('No refresh token');
+  try {
+    const res = await fetch(API + '/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    });
+    if (!res.ok) throw new Error('Refresh failed');
+    const data = await res.json();
+    if (data.success && data.data.access_token) {
+      accessToken = data.data.access_token;
+      localStorage.setItem('access_token', accessToken);
+      if (data.data.refresh_token) {
+        refreshToken = data.data.refresh_token;
+        localStorage.setItem('refresh_token', refreshToken);
+      }
+      return accessToken;
+    } else throw new Error(data.error?.message || 'Refresh failed');
+  } catch (e) {
+    logout();
+    throw e;
+  }
+}
+
+// ── Updated API Fetch with Auth & Envelope Handling ──────────────────────────
+async function apiFetch(path, opts = {}) {
+  const headers = opts.headers || {};
+  if (accessToken && !headers.Authorization) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const res = await fetch(API + path, { ...opts, headers });
+  
+  // Handle 401 by refreshing token and retrying
+  if (res.status === 401 && refreshToken && opts._retry !== true) {
+    try {
+      await refreshAccessToken();
+      return apiFetch(path, { ...opts, _retry: true });
+    } catch {
+      showAuthModal();
+      throw new Error('Session expired — please login again');
+    }
+  }
+  
+  if (!res.ok) {
+    try {
+      const data = await res.json();
+      throw new Error(data.error?.message || data.detail || `HTTP ${res.status}`);
+    } catch (e) {
+      if (e.message.includes('JSON')) throw new Error(`HTTP ${res.status}`);
+      throw e;
+    }
+  }
+  
+  const data = await res.json();
+  // Handle response envelope
+  if (data.success === false) {
+    throw new Error(data.error?.message || 'Server error');
+  }
+  // Return data payload (backward compatible - data contains response_text, audio_base64, etc.)
+  return data.data || data;
+}
+
+// ── WebSocket Connect with Token Auth ───────────────────────────────────────
+function wsConnect(sessionId) {
+  // Close any existing connection
+  if (ws && ws.readyState <= 1) ws.close();
+
+  if (!accessToken) {
+    toast('Not authenticated');
+    return;
+  }
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url   = `${proto}://${location.host}/ws/chat/${sessionId}?token=${encodeURIComponent(accessToken)}`;
+  ws          = new WebSocket(url);
+  wsSessionId = sessionId;
+
+  ws.onopen = () => {
+    console.log('[WS] connected:', sessionId);
+    updateWsStatus('connected');
+    // Start keepalive ping every 20s
+    ws._ping = setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'ping' })), 20000);
+  };
+
+  ws.onclose = (e) => {
+    console.log('[WS] closed:', e.code);
+    clearInterval(ws._ping);
+    updateWsStatus('disconnected');
+    ws = null;
+  };
+
+  ws.onerror = () => {
+    toast('WebSocket connection error — retrying via REST');
+    updateWsStatus('error');
+  };
+
+  ws.onmessage = (evt) => {
+    let msg;
+    try { msg = JSON.parse(evt.data); } catch { return; }
+    handleWsMessage(msg);
+  };
+}
+
+function updateWsStatus(state) {
+  const dot = document.getElementById('ws-dot');
+  if (!dot) return;
+  dot.className = 'ws-dot ' + state;
+  dot.title = { connected: 'Live (WebSocket)', disconnected: 'Disconnected', error: 'Connection error' }[state] || state;
+}
+
+// Resolve promise from outside — used to await a single WS response per turn
+let _wsResolve = null;
+let _wsReject  = null;
+
+function waitForWsResponse() {
+  return new Promise((resolve, reject) => {
+    _wsResolve = resolve;
+    _wsReject  = reject;
+    // Timeout safety net
+    setTimeout(() => reject(new Error('Response timeout — server took too long')), 60000);
+  });
+}
+
+function handleWsMessage(msg) {
+  if (msg.type === 'pong') return;
+
+  if (msg.type === 'ack') {
+    // Server has received our message and started processing — nothing to do in UI yet
+    return;
+  }
+
+  if (msg.type === 'error') {
+    const errMsg = msg.error?.message || msg.detail || 'Server error';
+    if (_wsReject) { _wsReject(new Error(errMsg)); _wsResolve = _wsReject = null; }
+    return;
+  }
+
+  if (msg.type === 'response') {
+    // New envelope format: response data is under msg.data
+    const payload = msg.data || msg;
+    if (_wsResolve) { _wsResolve(payload); _wsResolve = _wsReject = null; }
+    return;
+  }
+}
+
+// ── Auth Modal Functions ────────────────────────────────────────────────────
+function showAuthModal(isSignup = false) {
+  if (accessToken && currentUser) return;
+  const overlay = document.getElementById('auth-overlay');
+  overlay.style.display = 'flex';
+  if (isSignup) toggleAuthMode();
+}
+
+function closeAuthModal() {
+  document.getElementById('auth-overlay').style.display = 'none';
+  clearAuthErrors();
+}
+
+function toggleAuthMode(e) {
+  if (e) e.preventDefault();
+  const isSignup = !document.getElementById('auth-name-group').style.display.includes('none');
+  document.getElementById('auth-name-group').style.display = isSignup ? 'none' : 'block';
+  document.getElementById('auth-title').textContent = isSignup ? 'Sign In' : 'Create Account';
+  document.getElementById('auth-subtitle').textContent = isSignup ? 'Welcome back to BharatBot' : 'Join the multilingual AI community';
+  document.getElementById('auth-password-policy').style.display = isSignup ? 'none' : 'block';
+  document.getElementById('auth-toggle-text').textContent = isSignup ? "Don't have an account?" : "Already have an account?";
+  document.getElementById('auth-toggle-btn').textContent = isSignup ? 'Sign up' : 'Sign in';
+  document.getElementById('auth-submit-btn').textContent = isSignup ? 'Create Account' : 'Sign In';
+  clearAuthErrors();
+}
+
+function clearAuthErrors() {
+  ['auth-name-error', 'auth-email-error', 'auth-password-error'].forEach(id => {
+    document.getElementById(id).textContent = '';
+    document.getElementById(id).parentElement.classList.remove('error');
+  });
+}
+
+function setAuthError(field, message) {
+  const errorEl = document.getElementById(`auth-${field}-error`);
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.parentElement.classList.add('error');
+  }
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  clearAuthErrors();
+  
+  const isSignup = !document.getElementById('auth-name-group').style.display.includes('none');
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const name = isSignup ? document.getElementById('auth-name').value.trim() : null;
+  
+  if (!email) { setAuthError('email', 'Email is required'); return; }
+  if (!password) { setAuthError('password', 'Password is required'); return; }
+  if (isSignup && !name) { setAuthError('name', 'Name is required'); return; }
+  
+  const btn = document.getElementById('auth-submit-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ ' + (isSignup ? 'Creating...' : 'Signing in...');
+  
+  try {
+    const endpoint = isSignup ? '/auth/signup' : '/auth/login';
+    const body = isSignup ? { email, password, name } : { email, password };
+    const res = await fetch(API + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    
+    const data = await res.json();
+    
+    if (!data.success) {
+      const errMsg = data.error?.message || 'Authentication failed';
+      if (errMsg.includes('email')) setAuthError('email', errMsg);
+      else if (errMsg.includes('password')) setAuthError('password', errMsg);
+      else toast(errMsg);
+    } else {
+      // Success - store tokens and load app
+      accessToken = data.data.access_token;
+      refreshToken = data.data.refresh_token;
+      localStorage.setItem('access_token', accessToken);
+      localStorage.setItem('refresh_token', refreshToken);
+      currentUser = data.data.user;
+      
+      closeAuthModal();
+      updateUserProfile();
+      await loadSessions();
+      toast(`Welcome${currentUser?.name ? `, ${currentUser.name}` : ''}!`);
+    }
+  } catch (e) {
+    toast(`Error: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = isSignup ? 'Create Account' : 'Sign In';
+  }
+}
+
+function updateUserProfile() {
+  if (!currentUser) {
+    document.getElementById('user-profile-btn').style.display = 'none';
+    return;
+  }
+  
+  const btn = document.getElementById('user-profile-btn');
+  const avatar = document.getElementById('user-avatar-mini');
+  btn.style.display = 'flex';
+  
+  const initials = (currentUser.name || currentUser.email || '?').split(' ').map(x => x[0].toUpperCase()).join('').slice(0, 2) || '?';
+  avatar.textContent = initials;
+  avatar.title = currentUser.email || '';
+}
+
+function toggleUserMenu() {
+  const menu = document.getElementById('user-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+
+function closeUserMenu() {
+  document.getElementById('user-menu').style.display = 'none';
+}
+
+async function getCurrentUser() {
+  try {
+    const data = await apiFetch('/auth/me');
+    currentUser = data.user || data;
+    updateUserProfile();
+    return currentUser;
+  } catch {
+    return null;
+  }
+}
+
+function goToProfileModal() {
+  closeUserMenu();
+  if (!currentUser) return;
+  document.getElementById('profile-name').value = currentUser.name || '';
+  document.getElementById('profile-email').value = currentUser.email || '';
+  document.getElementById('profile-overlay').style.display = 'flex';
+}
+
+function closeProfileModal() {
+  document.getElementById('profile-overlay').style.display = 'none';
+}
+
+async function handleProfileSubmit(e) {
+  e.preventDefault();
+  const name = document.getElementById('profile-name').value.trim();
+  if (!name) {
+    document.getElementById('profile-name-error').textContent = 'Name is required';
+    return;
+  }
+  // Note: Profile update not implemented in backend yet, but structure is ready
+  toast('Profile update functionality coming soon');
+}
+
+function goToChangePasswordModal() {
+  closeUserMenu();
+  closeProfileModal();
+  document.getElementById('change-password-overlay').style.display = 'flex';
+  ['current-password', 'new-password', 'confirm-password'].forEach(id => document.getElementById(id).value = '');
+}
+
+function closeChangePasswordModal() {
+  document.getElementById('change-password-overlay').style.display = 'none';
+  ['current-password-error', 'new-password-error', 'confirm-password-error'].forEach(id => {
+    document.getElementById(id).textContent = '';
+  });
+}
+
+async function handleChangePasswordSubmit(e) {
+  e.preventDefault();
+  const current = document.getElementById('current-password').value;
+  const newPass = document.getElementById('new-password').value;
+  const confirm = document.getElementById('confirm-password').value;
+  
+  if (!current || !newPass || !confirm) {
+    toast('All fields are required');
+    return;
+  }
+  
+  if (newPass !== confirm) {
+    document.getElementById('confirm-password-error').textContent = 'Passwords do not match';
+    return;
+  }
+  
+  const btn = e.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  btn.textContent = '⏳ Changing...';
+  
+  try {
+    const data = await apiFetch('/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: current, new_password: newPass })
+    });
+    
+    toast('Password changed successfully! You have been logged out. Please login again.');
+    handleLogout();
+  } catch (e) {
+    toast(`Error: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Change Password';
+  }
+}
+
+async function handleLogout() {
+  closeUserMenu();
+  closeProfileModal();
+  closeChangePasswordModal();
+  
+  try {
+    if (accessToken) {
+      await apiFetch('/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      });
+    }
+  } catch {}
+  
+  logout();
+}
+
+function logout() {
+  accessToken = null;
+  refreshToken = null;
+  currentUser = null;
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  
+  // Close active chat
+  activeSessionId = null;
+  if (ws) ws.close();
+  document.getElementById('active-chat').style.display = 'none';
+  document.getElementById('no-session-state').style.display = 'flex';
+  
+  // Update UI
+  document.getElementById('sessions-list').innerHTML = '';
+  updateUserProfile();
+  
+  // Show auth modal
+  showAuthModal();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function toast(msg, dur = 2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), dur);
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (d.toDateString() === new Date().toDateString()) return 'Today';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function isDevanagari(text) {
+  return /[\u0900-\u097F]/.test(text);
+}
+
+function langLabel(lang) {
+  return { en: 'EN', hi: 'HI', mr: 'MR' }[lang] || (lang || 'EN').toUpperCase();
+}
+
+function parseLangInfo(res) {
+  if (Array.isArray(res.detected_langs) && res.detected_langs.length > 0) {
+    return {
+      detectedLangs: res.detected_langs,
+      dominantLang:  res.dominant_lang || res.detected_langs[0],
+    };
+  }
+  if (res.detected_lang) {
+    return { detectedLangs: [res.detected_lang], dominantLang: res.detected_lang };
+  }
+  return { detectedLangs: ['en'], dominantLang: 'en' };
+}
+
+function renderLangBadgeStrip(detectedLangs, dominantLang) {
+  const strip = document.getElementById('lang-badge-strip');
+  if (!strip) return;
+  if (!detectedLangs || !detectedLangs.length) { strip.innerHTML = ''; return; }
+  strip.innerHTML = detectedLangs.map(lang => {
+    const isDom = lang === dominantLang;
+    return `<span class="lang-badge ${lang}${isDom ? ' dom' : ''}" title="${isDom ? 'Dominant' : 'Also detected'}">${langLabel(lang)}${isDom ? ' ★' : ''}</span>`;
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────────
+async function loadSessions() {
+  if (!accessToken) {
+    showAuthModal();
+    return;
+  }
+  try {
+    const data = await apiFetch('/sessions?limit=50');
+    // Data is wrapped in envelope - apiFetch returns the .data payload
+    sessions = Array.isArray(data) ? data : (data.sessions || data);
+    renderSessions();
+  } catch (e) {
+    // If error is auth-related, show auth modal
+    if (e.message.includes('401') || e.message.includes('unauthorized')) {
+      showAuthModal();
+    } else {
+      toast(`Failed to load sessions: ${e.message}`);
+    }
+  }
+}
+
+function renderSessions() {
+  const list = document.getElementById('sessions-list');
+  if (!sessions.length) {
+    list.innerHTML = `<div style="padding:24px 16px;text-align:center;color:var(--muted);font-size:12px;line-height:1.8">No conversations yet.<br>Click <strong style="color:var(--text)">New conversation</strong> to start.</div>`;
+    return;
+  }
+  list.innerHTML = sessions.map(s => `
+    <div class="session-item ${s.session_id === activeSessionId ? 'active' : ''}" onclick="selectSession('${s.session_id}')">
+      <div class="session-title">${s.title || 'Untitled conversation'}</div>
+      <div class="session-meta">
+        <span class="lang-chip ${s.lang || 'en'}" style="font-size:9px;padding:1px 5px;">${langLabel(s.lang || 'en')}</span>
+        <span>${fmtDate(s.updated_at)}</span>
+        ${s.message_count ? `<span>· ${s.message_count} msgs</span>` : ''}
+      </div>
+      <button class="session-del" onclick="deleteSession(event,'${s.session_id}')" title="Delete">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+      </button>
+    </div>`).join('');
+}
+
+async function createSession() {
+  if (!accessToken) {
+    showAuthModal();
+    return;
+  }
+  const title = `Conversation ${new Date().toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}`;
+  try {
+    const s = await apiFetch('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, lang: 'en' }),
+    });
+    // API returns the session object directly or wrapped
+    const session = s.session_id ? s : s.session;
+    sessions.unshift({ ...session, message_count: 0, updated_at: new Date().toISOString() });
+    renderSessions();
+    selectSession(session.session_id);
+  } catch (e) {
+    toast(`Failed to create session: ${e.message}`);
+  }
+}
+
+async function deleteSession(e, id) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await apiFetch(`/sessions/${id}`, { method: 'DELETE' });
+    if (activeSessionId === id) {
+      activeSessionId = null;
+      document.getElementById('active-chat').style.display = 'none';
+      document.getElementById('no-session-state').style.display = 'flex';
+    }
+    sessions = sessions.filter(s => s.session_id !== id);
+    renderSessions();
+    toast('Conversation deleted');
+  } catch (e) {
+    toast(`Failed to delete: ${e.message}`);
+  }
+}
+
+// ── Select session ─────────────────────────────────────────────────────────
+async function selectSession(id) {
+  activeSessionId = id;
+  renderSessions();
+
+  document.getElementById('no-session-state').style.display = 'none';
+  document.getElementById('active-chat').style.display = 'flex';
+  renderLangBadgeStrip([], null);
+
+  const s = sessions.find(x => x.session_id === id);
+  document.getElementById('chat-title').textContent = s?.title || 'Conversation';
+  if (s?.lang) renderLangBadgeStrip([s.lang], s.lang);
+
+  // Connect WebSocket for this session
+  wsConnect(id);
+
+  const pane = document.getElementById('messages-pane');
+  pane.innerHTML = '';
+
+  try {
+    const data = await apiFetch(`/sessions/${id}/messages?limit=100`);
+    const msgs  = data.messages || [];
+    if (!msgs.length) {
+      pane.innerHTML = `<div class="empty-state"><div class="empty-icon">🌐</div><h3>Start chatting</h3><p>Type or speak in English, हिंदी, or मराठी. Mix them freely!</p></div>`;
+    } else {
+      msgs.forEach(m => {
+        if (m.role === 'user') {
+          // User bubbles never have audio
+          appendBubble('user', m.original_text, [m.detected_lang], m.detected_lang,
+                       m.content_type, null, m.created_at, null, null, false);
+        } else {
+          // CHANGE 4 integration: pass session_id + message_id + has_audio_out so the
+          // "Load audio" button only appears for messages that actually have stored audio.
+          appendBubble('bot', m.response_text, [m.detected_lang], m.detected_lang,
+                       m.content_type, null, m.created_at, id, m.message_id, !!m.has_audio_out);
+        }
+      });
+      scrollBottom();
+    }
+  } catch {
+    pane.innerHTML = `<div class="empty-state"><div class="empty-icon">🌐</div><h3>Start chatting</h3><p>Type or speak in English, हिंदी, or मराठी.</p></div>`;
+  }
+}
+
+function showNoSession() {
+  document.getElementById('no-session-state').style.display = 'flex';
+  document.getElementById('active-chat').style.display = 'none';
+}
+
+// ── Render bubbles ──────────────────────────────────────────────────────────
+// audioB64   : present for live API responses → inline player shown immediately
+// sessionId  : present for history bot bubbles → enables Load Audio button
+// messageId  : present for history bot bubbles → endpoint key
+// hasAudioOut: true only when has_audio_out=1 in DB (audio was stored in S3)
+function appendBubble(who, text, detectedLangs, dominantLang, type, audioB64, ts, sessionId, messageId, hasAudioOut) {
+  const pane  = document.getElementById('messages-pane');
+  const empty = pane.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const dom      = dominantLang || (Array.isArray(detectedLangs) ? detectedLangs[0] : 'en') || 'en';
+  const langs    = Array.isArray(detectedLangs) ? detectedLangs : [dom];
+  const devFont  = (dom === 'hi' || dom === 'mr') || isDevanagari(text || '');
+  const isMixed  = langs.length > 1;
+
+  const langTagsHtml = langs.map((l,i) =>
+    `<span class="bubble-tag ${l}" title="${i===0?'Dominant':'Also detected'}">${langLabel(l)}</span>`
+  ).join('');
+  const mixedTag = isMixed ? `<span class="bubble-tag mixed">MIX</span>` : '';
+  const voiceTag = type === 'voice' ? `<span class="bubble-tag voice">🎙 voice</span>` : '';
+
+  // ── Audio section ──
+  // Case 1: live response → inline player from base64
+  // Case 2: history bot bubble with has_audio_out=true → "Load audio" button (CHANGE 4)
+  // Case 3: history bot bubble with has_audio_out=false → no audio section
+  // Case 4: user bubble → no audio
+  let audioHtml = '';
+  if (audioB64) {
+    // Live response — player available immediately
+    audioHtml = buildPlayerHtml(null, audioB64, dom, '');
+  } else if (who === 'bot' && sessionId && messageId && hasAudioOut) {
+    // CHANGE 4: history bubble with stored audio — show Load Audio button
+    audioHtml = `<button class="load-audio-btn"
+      data-session="${sessionId}" data-msg="${messageId}"
+      data-lang="${dom}"
+      onclick="handleLoadAudio(this)">🔊 Load audio</button>`;
+  }
+  // else: no audio section rendered (old messages without audio, or user bubbles)
+
+  const row = document.createElement('div');
+  row.className = `msg-row ${who}`;
+  row.innerHTML = `
+    <div class="avatar ${who}">${who === 'user' ? 'U' : 'B'}</div>
+    <div class="bubble ${who}">
+      <div class="bubble-meta">${langTagsHtml}${mixedTag}${voiceTag}</div>
+      <div class="bubble-text ${devFont ? 'devanagari' : ''}">${escHtml(text||'…')}</div>
+      <div class="audio-slot">${audioHtml}</div>
+      <div class="bubble-time">${ts ? fmtTime(ts) : 'just now'}</div>
+    </div>`;
+
+  // Store response text on the button via DOM property to avoid HTML-escaping issues
+  if (who === 'bot' && sessionId && messageId && hasAudioOut) {
+    const btn = row.querySelector('.load-audio-btn');
+    if (btn) btn._text = text || '';
+  }
+
+  pane.appendChild(row);
+  scrollBottom();
+  return row;
+}
+
+// ── Load audio for a history bubble ───────────────────────────────────────
+// CHANGE 4 integration: calls GET /sessions/{id}/messages/{msgId}/audio
+// Returns presigned S3 URL (if stored) or synthesised base64 (fallback).
+// If that also fails, downgrades to CHANGE 5 Regenerate button.
+async function handleLoadAudio(btn) {
+  const sessionId = btn.dataset.session;
+  const messageId = btn.dataset.msg;
+  const lang      = btn.dataset.lang || 'en';
+  const text      = btn._text || '';
+
+  btn.disabled = true;
+  btn.classList.add('busy');
+  btn.textContent = '⏳ Loading…';
+
+  try {
+    const res = await apiFetch(`/sessions/${sessionId}/messages/${messageId}/audio`);
+
+    const slot = btn.closest('.audio-slot');
+    if (res.audio_url) {
+      // CHANGE 4 proper path: stored Polly audio from S3 via presigned URL
+      slot.innerHTML = buildPlayerHtml(res.audio_url, null, lang, '');
+    } else if (res.audio_base64) {
+      // Backend synthesised on-demand (no stored key) — still works
+      slot.innerHTML = buildPlayerHtml(null, res.audio_base64, lang, ' (regenerated)');
+    } else {
+      throw new Error('No audio in response');
+    }
+
+  } catch {
+    // CHANGE 5 fallback: /audio endpoint failed → downgrade to /tts Regenerate button
+    btn.disabled = false;
+    btn.classList.remove('busy');
+    btn.textContent = '🔄 Regenerate audio';
+    btn.onclick = () => handleRegenerate(btn, text, lang);
+    toast('Stored audio unavailable — click Regenerate to create it');
+  }
+}
+
+// CHANGE 5 integration: POST /tts endpoint for on-demand TTS synthesis
+async function handleRegenerate(btn, text, lang) {
+  if (!text) { toast('No text to synthesise'); return; }
+  btn.disabled = true;
+  btn.classList.add('busy');
+  btn.textContent = '⏳ Synthesising…';
+
+  try {
+    const res = await apiFetch('/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, lang }),
+    });
+    btn.closest('.audio-slot').innerHTML = buildPlayerHtml(null, res.audio_base64, lang, ' (regenerated)');
+  } catch (e) {
+    btn.disabled = false;
+    btn.classList.remove('busy');
+    btn.textContent = '🔄 Regenerate audio';
+    toast(`TTS failed: ${e.message}`);
+  }
+}
+
+// Build the audio player HTML — accepts either a URL or base64 (not both)
+function buildPlayerHtml(url, b64, lang, suffix) {
+  const uid = 'ap_' + Math.random().toString(36).slice(2);
+  const src = url ? `data-url="${url}"` : `data-b64="${b64}"`;
+  return `
+    <div class="audio-player">
+      <button class="play-btn" id="${uid}" ${src} data-lang="${lang}" onclick="handlePlay(this)" aria-label="Play audio">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <span class="audio-label">Listen in ${langLabel(lang)}${suffix}</span>
+    </div>`;
+}
+
+// ── Audio playback ──────────────────────────────────────────────────────────
+const PLAY_ICON  = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
+const PAUSE_ICON = `<svg viewBox="0 0 24 24" fill="white" width="12" height="12"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+
+function handlePlay(btn) {
+  if (currentAudio && !currentAudio.paused) {
+    currentAudio.pause();
+    document.querySelectorAll('.play-btn[data-playing]').forEach(b => {
+      if (b !== btn) { b.innerHTML = PLAY_ICON; delete b.dataset.playing; }
+    });
+    if (btn.dataset.playing) {
+      btn.innerHTML = PLAY_ICON;
+      delete btn.dataset.playing;
+      currentAudio = null;
+      return;
+    }
+  }
+
+  let playUrl = btn.dataset.url || null;
+  if (!playUrl && btn.dataset.b64) {
+    const b64 = btn.dataset.b64;
+    if (!audioCache[b64]) {
+      const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      audioCache[b64] = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+    }
+    playUrl = audioCache[b64];
+  }
+
+  if (!playUrl) { toast('No audio source'); return; }
+
+  const audio = new Audio(playUrl);
+  currentAudio = audio;
+  btn.innerHTML = PAUSE_ICON;
+  btn.dataset.playing = '1';
+
+  audio.play().catch(() => { btn.innerHTML = PLAY_ICON; delete btn.dataset.playing; });
+  audio.onended = () => { btn.innerHTML = PLAY_ICON; delete btn.dataset.playing; currentAudio = null; };
+  audio.onerror = () => { btn.innerHTML = PLAY_ICON; delete btn.dataset.playing; toast('Audio playback error'); currentAudio = null; };
+
+  btn.onclick = () => {
+    if (audio.paused) { audio.play(); btn.innerHTML = PAUSE_ICON; btn.dataset.playing = '1'; }
+    else              { audio.pause(); btn.innerHTML = PLAY_ICON; delete btn.dataset.playing; }
+  };
+}
+
+function appendLoading() {
+  const pane = document.getElementById('messages-pane');
+  const row  = document.createElement('div');
+  row.className = 'msg-row bot';
+  row.id = 'loading-bubble';
+  row.innerHTML = `<div class="avatar bot">B</div><div class="bubble bot loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
+  pane.appendChild(row);
+  scrollBottom();
+}
+function removeLoading() { document.getElementById('loading-bubble')?.remove(); }
+function scrollBottom() { const p = document.getElementById('messages-pane'); p.scrollTop = p.scrollHeight; }
+
+// ── Text input ──────────────────────────────────────────────────────────────
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
+  document.getElementById('send-btn').disabled = !document.getElementById('text-input').value.trim();
+}
+function autoResize(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  document.getElementById('send-btn').disabled = !ta.value.trim();
+}
+function insertHint(text) {
+  const inp = document.getElementById('text-input');
+  inp.value = text; autoResize(inp); inp.focus();
+  document.getElementById('send-btn').disabled = false;
+}
+
+// ── Send text ──────────────────────────────────────────────────────────────
+async function sendText() {
+  const inp  = document.getElementById('text-input');
+  const text = inp.value.trim();
+  if (!text || isBusy || !activeSessionId) return;
+
+  inp.value = ''; autoResize(inp);
+  document.getElementById('send-btn').disabled = true;
+  isBusy = true;
+
+  appendBubble('user', text, ['en'], 'en', 'text', null, new Date().toISOString(), null, null, false);
+  appendLoading();
+
+  try {
+    let res;
+
+    // ── WebSocket path (preferred) ─────────────────────────────────────
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'text', text }));
+      res = await waitForWsResponse();
+    } else {
+      // ── REST fallback ────────────────────────────────────────────────
+      const fd = new FormData();
+      fd.append('text', text);
+      res = await apiFetch(`/sessions/${activeSessionId}/chat/text`, { method: 'POST', body: fd });
+    }
+
+    removeLoading();
+
+    const { detectedLangs, dominantLang } = parseLangInfo(res);
+
+    // Retroactively update user bubble lang tags
+    const userRows = document.querySelectorAll('.msg-row.user');
+    if (userRows.length) {
+      const last = userRows[userRows.length - 1];
+      const meta = last.querySelector('.bubble-meta');
+      if (meta) {
+        const langHtml = detectedLangs.map((l,i) =>
+          `<span class="bubble-tag ${l}" title="${i===0?'Dominant':'Also detected'}">${langLabel(l)}</span>`
+        ).join('');
+        const voiceTag = meta.querySelector('.bubble-tag.voice')?.outerHTML || '';
+        meta.innerHTML = langHtml + (detectedLangs.length > 1 ? `<span class="bubble-tag mixed">MIX</span>` : '') + voiceTag;
+      }
+      const bt = last.querySelector('.bubble-text');
+      if (bt && (dominantLang === 'hi' || dominantLang === 'mr' || isDevanagari(text))) bt.classList.add('devanagari');
+    }
+
+    appendBubble('bot', res.response_text, detectedLangs, dominantLang, 'text',
+                 res.audio_base64, new Date().toISOString(), null, null, false);
+
+    updateSessionLang(activeSessionId, dominantLang);
+    renderLangBadgeStrip(detectedLangs, dominantLang);
+
+  } catch (e) {
+    removeLoading();
+    appendBubble('bot', `Error: ${e.message}`, ['en'], 'en', 'text', null, new Date().toISOString(), null, null, false);
+  }
+  isBusy = false;
+}
+
+function updateSessionLang(id, lang) {
+  const s = sessions.find(x => x.session_id === id);
+  if (s) { s.lang = lang; s.updated_at = new Date().toISOString(); }
+  renderSessions();
+}
+
+// ── Voice recording (PCM via AudioContext — no ffmpeg needed on server) ───────
+const PCM_SAMPLE_RATE = 16000;
+const PCM_BUFFER_SIZE = 4096;
+
+let audioCtx        = null;
+let mediaStream     = null;
+let scriptProcessor = null;
+let pcmChunks       = [];
+let isRecording     = false;
+
+async function toggleRecording() {
+  if (isRecording) stopRecording();
+  else await startRecording();
+}
+
+async function startRecording() {
+  if (!activeSessionId) { toast('Select a conversation first'); return; }
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Open AudioContext at exactly 16kHz — browser resamples automatically
+    audioCtx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+    const source = audioCtx.createMediaStreamSource(mediaStream);
+
+    // ScriptProcessorNode taps raw PCM float32 samples
+    scriptProcessor = audioCtx.createScriptProcessor(PCM_BUFFER_SIZE, 1, 1);
+    pcmChunks = [];
+    scriptProcessor.onaudioprocess = (e) => {
+      const samples = e.inputBuffer.getChannelData(0);
+      pcmChunks.push(new Float32Array(samples)); // copy — buffer is reused
+    };
+
+    source.connect(scriptProcessor);
+    scriptProcessor.connect(audioCtx.destination); // must be connected to run
+
+    isRecording = true;
+    document.getElementById('mic-btn').classList.add('recording');
+    document.getElementById('rec-banner').classList.add('active');
+    recSeconds = 0;
+    recInterval = setInterval(() => {
+      recSeconds++;
+      const m = Math.floor(recSeconds/60), s = recSeconds%60;
+      document.getElementById('rec-timer').textContent = `${m}:${String(s).padStart(2,'0')}`;
+    }, 1000);
+
+  } catch { toast('Microphone access denied. Please allow mic in browser settings.'); }
+}
+
+function stopRecording() {
+  clearInterval(recInterval);
+  isRecording = false;
+
+  if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
+  if (mediaStream)     { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (audioCtx)        { audioCtx.close(); audioCtx = null; }
+
+  document.getElementById('mic-btn').classList.remove('recording');
+  document.getElementById('rec-banner').classList.remove('active');
+
+  handleAudioStop();
+}
+
+// Convert collected Float32 PCM chunks → Int16 Blob (s16le, 16kHz, mono)
+function buildPcmBlob(chunks) {
+  const totalSamples = chunks.reduce((sum, c) => sum + c.length, 0);
+  const int16 = new Int16Array(totalSamples);
+  let offset = 0;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i++) {
+      const s = Math.max(-1, Math.min(1, chunk[i]));
+      int16[offset++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+  }
+  return new Blob([int16.buffer], { type: 'audio/pcm' });
+}
+
+async function handleAudioStop() {
+  if (isBusy) return;
+  isBusy = true;
+
+  const blob = buildPcmBlob(pcmChunks);
+  pcmChunks  = [];
+  appendBubble('user', '🎙 Voice message…', ['en'], 'en', 'voice', null, new Date().toISOString(), null, null, false);
+  appendLoading();
+
+  try {
+    let res;
+
+    // ── WebSocket path (preferred) ─────────────────────────────────────
+    if (ws && ws.readyState === 1) {
+      // Convert blob → base64
+      const arrayBuf = await blob.arrayBuffer();
+      const bytes    = new Uint8Array(arrayBuf);
+      let binary     = '';
+      bytes.forEach(b => binary += String.fromCharCode(b));
+      const audio_b64 = btoa(binary);
+      ws.send(JSON.stringify({ type: 'voice', audio_b64 }));
+      res = await waitForWsResponse();
+    } else {
+      // ── REST fallback ────────────────────────────────────────────────
+      const fd = new FormData();
+      fd.append('audio', blob, 'recording.pcm');
+      res = await apiFetch(`/sessions/${activeSessionId}/chat/voice`, { method: 'POST', body: fd });
+    }
+
+    removeLoading();
+
+    const { detectedLangs, dominantLang } = parseLangInfo(res);
+
+    const userRows = document.querySelectorAll('.msg-row.user');
+    if (userRows.length) {
+      const last = userRows[userRows.length - 1];
+      const bt   = last.querySelector('.bubble-text');
+      const meta = last.querySelector('.bubble-meta');
+      if (bt) {
+        bt.innerHTML = escHtml(res.transcript || '…');
+        if (dominantLang === 'hi' || dominantLang === 'mr' || isDevanagari(res.transcript||'')) bt.classList.add('devanagari');
+      }
+      if (meta) {
+        const langHtml = detectedLangs.map((l,i) =>
+          `<span class="bubble-tag ${l}" title="${i===0?'Dominant':'Also detected'}">${langLabel(l)}</span>`
+        ).join('');
+        meta.innerHTML = langHtml + (detectedLangs.length > 1 ? `<span class="bubble-tag mixed">MIX</span>` : '') + `<span class="bubble-tag voice">🎙 voice</span>`;
+      }
+    }
+
+    appendBubble('bot', res.response_text, detectedLangs, dominantLang, 'voice',
+                 res.audio_base64, new Date().toISOString(), null, null, false);
+
+    updateSessionLang(activeSessionId, dominantLang);
+    renderLangBadgeStrip(detectedLangs, dominantLang);
+
+  } catch (e) {
+    removeLoading();
+    appendBubble('bot', `Error: ${e.message}`, ['en'], 'en', 'voice', null, new Date().toISOString(), null, null, false);
+  }
+  isBusy = false;
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
+async function initApp() {
+  // Check if already logged in
+  if (accessToken) {
+    try {
+      await getCurrentUser();
+      updateUserProfile();
+      await loadSessions();
+    } catch (e) {
+      console.error('Failed to restore session:', e);
+      logout();
+    }
+  } else {
+    showAuthModal();
+  }
+}
+
+// Start app
+initApp();
+</script>
+</body>
+</html>
+
