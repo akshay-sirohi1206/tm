@@ -175,6 +175,7 @@ def get_session_or_404(conn: pymysql.Connection, session_id: str, user_id: Optio
     return row
 
 
+# ✅ SAHI
 def fetch_session_history(conn: pymysql.Connection, session_id: str, limit: int = 20) -> List[dict]:
     with conn.cursor() as cursor:
         cursor.execute(

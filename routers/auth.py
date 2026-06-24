@@ -77,7 +77,7 @@ async def login(body: LoginRequest):
             )
 
         user_id = user["user_id"]
-        access_token = issue_access_token(user_id)
+        access_token = issue_access_token(user_id, user["email"])
         refresh_token, jti, exp_str = issue_refresh_token(user_id)
         
         create_refresh_token(conn, user_id, hash_token(refresh_token), jti, exp_str)
@@ -85,8 +85,14 @@ async def login(body: LoginRequest):
     logger.info(f"[AUTH] Logged in user: {user_id}")
     return success_response(
         data={
-            "user": {"user_id": user_id, "name": user["name"], "email": user["email"]},
-            "tokens": {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+            "user": {
+                "user_id": user["user_id"],
+                "name": user["name"],
+                "email": user["email"],
+            },
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
         }
     )
 
@@ -109,7 +115,12 @@ async def refresh(body: RefreshTokenRequest):
         if not verify_password(body.refresh_token, stored["token_hash"]):
             raise HTTPException(status_code=401, detail="Invalid token token context.")
 
-        access_token = issue_access_token(user_id)
+        # ✅ user fetch karo taaki email mile
+        user = get_user_by_id(conn, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        access_token = issue_access_token(user_id, user["email"])
         new_refresh_token, new_jti, exp_str = issue_refresh_token(user_id)
 
         revoke_refresh_token(conn, jti)
@@ -118,6 +129,7 @@ async def refresh(body: RefreshTokenRequest):
     return success_response(
         data={"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
     )
+    
 
 
 @router.post("/logout", status_code=200)

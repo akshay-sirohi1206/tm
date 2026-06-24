@@ -14,7 +14,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"], dependencies=[Depends(
 
 @router.post("", status_code=201)
 async def create_session(body: SessionCreateRequest, user_id: str = Depends(get_current_user)):
-    """Create a new chat session for the authenticated user in AWS RDS."""
+    """Create a new chat session for the authenticated user."""
     session_id = uuid.uuid4().hex
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -31,38 +31,89 @@ async def create_session(body: SessionCreateRequest, user_id: str = Depends(get_
 
 @router.get("")
 async def list_sessions(user_id: str = Depends(get_current_user), limit: int = 20, offset: int = 0):
-    """List all sessions for the authenticated user from RDS."""
+    """List all sessions for the authenticated user."""
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT session_id, user_id, title, lang, is_active, created_at, updated_at 
-                FROM sessions 
-                WHERE user_id = %s AND is_active = 1
-                ORDER BY updated_at DESC
-                LIMIT %s OFFSET %s
+                SELECT s.session_id, s.title, s.lang, s.created_at, s.updated_at,
+                       COUNT(m.message_id) AS message_count
+                FROM   sessions s
+                LEFT JOIN messages m ON m.session_id = s.session_id
+                WHERE  s.user_id = %s AND s.is_active = 1
+                GROUP  BY s.session_id, s.title, s.lang, s.created_at, s.updated_at
+                ORDER  BY s.updated_at DESC
+                LIMIT  %s OFFSET %s
                 """,
                 (user_id, limit, offset),
             )
             rows = cursor.fetchall()
+    return success_response(
+        data={
+            "sessions": rows,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
+
+@router.get("/{session_id}")
+async def get_session(session_id: str, user_id: str = Depends(get_current_user)):
+    """Get a specific session (with ownership verification)."""
+    with get_db() as conn:
+        row = get_session_or_404(conn, session_id, user_id=user_id)
+        with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT COUNT(*) as cnt FROM sessions WHERE user_id = %s AND is_active = 1",
-                (user_id,),
+                "SELECT COUNT(*) AS cnt FROM messages WHERE session_id = %s", (session_id,)
             )
-            total = cursor.fetchone()["cnt"]
+            msg_count = cursor.fetchone()["cnt"]
+    return success_response(
+        data={**row, "message_count": msg_count}
+    )
 
-    return success_response(data={"total": total, "limit": limit, "offset": offset, "sessions": rows})
+
+@router.patch("/{session_id}")
+async def update_session(session_id: str, body: SessionUpdateRequest, user_id: str = Depends(get_current_user)):
+    """Update a session (with ownership verification)."""
+    with get_db() as conn:
+        get_session_or_404(conn, session_id, user_id=user_id)
+        with conn.cursor() as cursor:
+            if body.title is not None:
+                cursor.execute(
+                    "UPDATE sessions SET title = %s, updated_at = NOW() WHERE session_id = %s",
+                    (body.title, session_id),
+                )
+            if body.lang is not None:
+                cursor.execute(
+                    "UPDATE sessions SET lang = %s, updated_at = NOW() WHERE session_id = %s",
+                    (body.lang, session_id),
+                )
+    return success_response(
+        data={"session_id": session_id, "updated": True}
+    )
+
+
+@router.delete("/{session_id}", status_code=204)
+async def delete_session(session_id: str, user_id: str = Depends(get_current_user)):
+    """Soft-delete a session (with ownership verification)."""
+    with get_db() as conn:
+        get_session_or_404(conn, session_id, user_id=user_id)
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE sessions SET is_active = 0, updated_at = NOW() WHERE session_id = %s",
+                (session_id,),
+            )
+    logger.info(f"[SESSION] Soft-deleted: {session_id!r} user={user_id!r}")
 
 
 @router.get("/{session_id}/messages")
-async def list_session_messages(
+async def get_session_messages(
     session_id: str,
     user_id: str = Depends(get_current_user),
     limit: int = 50,
     offset: int = 0,
 ):
-    """Fetch all messages for a specific session."""
+    """Get all messages in a session (with ownership verification)."""
     with get_db() as conn:
         get_session_or_404(conn, session_id, user_id=user_id)
         with conn.cursor() as cursor:
@@ -78,12 +129,10 @@ async def list_session_messages(
                 (session_id, limit, offset),
             )
             rows = cursor.fetchall()
-
             cursor.execute(
-                "SELECT COUNT(*) as cnt FROM messages WHERE session_id = %s", (session_id,)
+                "SELECT COUNT(*) AS cnt FROM messages WHERE session_id = %s", (session_id,)
             )
             total = cursor.fetchone()["cnt"]
-
     return success_response(
         data={
             "session_id": session_id,
@@ -97,7 +146,7 @@ async def list_session_messages(
 
 @router.delete("/{session_id}/messages", status_code=204)
 async def clear_session_messages(session_id: str, user_id: str = Depends(get_current_user)):
-    """Clear all messages in a session with MySQL auto-commit block integration."""
+    """Clear all messages in a session (with ownership verification)."""
     with get_db() as conn:
         get_session_or_404(conn, session_id, user_id=user_id)
         with conn.cursor() as cursor:
@@ -106,5 +155,5 @@ async def clear_session_messages(session_id: str, user_id: str = Depends(get_cur
                 "UPDATE sessions SET updated_at = NOW() WHERE session_id = %s",
                 (session_id,),
             )
-    return None
-
+    logger.info(f"[SESSION] Cleared messages for session: {session_id!r} user={user_id!r}")
+    
