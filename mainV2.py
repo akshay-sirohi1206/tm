@@ -10,7 +10,7 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-from fastapi import FastAPI, Request, HTTPException, status
+from fastapi import FastAPI, Request, HTTPException, status, APIRouter  # 👈 APIRouter add kiya
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -41,8 +41,6 @@ _console_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
 # Base root initialization
 handlers_list = [_console_handler]
 
-# S3 or Lambda instances are ephemeral (Read-only storage file system)
-# Local files only get configured if running locally via Uvicorn
 if not IS_LAMBDA:
     LOGS_DIR = BASE_DIR / "logs"
     try:
@@ -107,7 +105,13 @@ def setup_file_logger():
 
 # ─── App Definition ──────────────────────────────────────────────────────────
 
-app = FastAPI(title="BharatBot — Multilingual Voice Chat (Pipecat)", version="3.0.0")
+# Swager docs ko hum /api/docs aur /api/openapi.json par override kar rahe hain taaki frontend se na takraye
+app = FastAPI(
+    title="BharatBot — Multilingual Voice Chat (Pipecat)", 
+    version="3.0.0",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -152,17 +156,31 @@ async def startup():
     else:
         logger.info("No BEDROCK_KB_ID found — bypassing vector sync mapping rules.")
 
-    # [Important Security Notice]: 
-    # Lambda setup leverages dynamic migrations via Alembic from terminal.
-    # init_db() hook will verify connectivity.
     init_db()
     logger.info("BharatBot Server Ready for triggers.")
 
-# ─── Routers ─────────────────────────────────────────────────────────────────
-app.include_router(auth_router)
-app.include_router(sessions_router)
-app.include_router(chat_router)
-app.include_router(ws_router)
+# ─── Routers With Path-Routing Prefix Wrapper ─────────────────────────────────
+# ✨ UPDATED: Ek main master api_router banaya jo saare sub-routers ko /api deta hai
+api_router = APIRouter(prefix="/api")
+
+api_router.include_router(auth_router)
+api_router.include_router(sessions_router)
+api_router.include_router(chat_router)
+api_router.include_router(ws_router)
+
+# ─── Verification Checkpoints (Inside Prefix) ─────────────────────────────────
+@api_router.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "model": BEDROCK_MODEL_ID,
+        "region": AWS_REGION,
+        "framework": "pipecat",
+        "runtime_layer": "AWS_Lambda" if IS_LAMBDA else "Local_Machine"
+    }
+
+# Main app mein master routing configuration inject ki
+app.include_router(api_router)
 
 # ─── Global Exception Handlers ────────────────────────────────────────────────
 @app.exception_handler(HTTPException)
@@ -180,17 +198,6 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=500,
     )
 
-# ─── Verification Checkpoints ────────────────────────────────────────────────
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "model": BEDROCK_MODEL_ID,
-        "region": AWS_REGION,
-        "framework": "pipecat",
-        "runtime_layer": "AWS_Lambda" if IS_LAMBDA else "Local_Machine"
-    }
-
 @app.get("/ui", response_class=HTMLResponse)
 async def ui():
     ui_path = BASE_DIR / "bharatbot_ui2.html"
@@ -198,7 +205,5 @@ async def ui():
         return "<h1>UI file not found — place bharatbot_ui2.html in the same directory as main.py.</h1>"
     return ui_path.read_text(encoding="utf-8")
 
-# 🚀 STEP 3: EXPORT MANGUM HANDLER VARIABLE FOR TERRAFORM
-# Is handler variable ko Lambda deployment configuration reference ke tarah use karega.
-# path config reference: main.handler
+# 🚀 STEP 3: EXPORT MANGUM HANDLER
 handler = Mangum(app, lifespan="off")
