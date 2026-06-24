@@ -184,7 +184,7 @@ def fetch_session_history(conn: pymysql.Connection, session_id: str, limit: int 
             FROM   messages
             WHERE  session_id = %s
               AND  role IN ('user', 'assistant')
-              AND  content IS NOT NULL
+              AND  COALESCE(english_text, original_text) IS NOT NULL
             ORDER  BY created_at DESC
             LIMIT  %s
             """,
@@ -232,6 +232,7 @@ def save_turn(
     asst_id = uuid.uuid4().hex
 
     with conn.cursor() as cursor:
+        # ── User message ─────────────────────────────────────────────────
         cursor.execute(
             """
             INSERT INTO messages
@@ -243,6 +244,7 @@ def save_turn(
              detected_lang, audio_s3_uri),
         )
 
+        # ── Assistant message ─────────────────────────────────────────────
         cursor.execute(
             """
             INSERT INTO messages
@@ -251,15 +253,23 @@ def save_turn(
                  detected_lang, has_audio_out)
             VALUES (%s, %s, 'assistant', %s, %s, %s, %s, %s, %s)
             """,
-            (asst_id, session_id, content_type, response_text, response_text,
-             response_text, detected_lang, has_audio_out),
+            (asst_id, session_id, content_type,
+             response_text,   # ✅ original_text = response_text (assistant ka text)
+             response_text,   # ✅ english_text  = response_text
+             response_text,   # ✅ response_text = response_text
+             detected_lang, has_audio_out),
         )
 
+        # ── Session updated_at refresh karo — lang mat badlo ─────────────
+        # ❌ PEHLE: lang = detected_lang — ye har turn pe session lang overwrite
+        #           kar deta tha, jisse agli baar pipeline wrong lang milti thi
+        # ✅ SAHI:  sirf updated_at update karo, lang wahi rakho jo session create
+        #           karte waqt set hua tha
         cursor.execute(
-            "UPDATE sessions SET updated_at = NOW(), lang = %s WHERE session_id = %s",
-            (detected_lang, session_id),
+            "UPDATE sessions SET updated_at = NOW() WHERE session_id = %s",
+            (session_id,),
         )
-
+        
 
 # ─── User helpers ────────────────────────────────────────────────────────────
 
