@@ -1,6 +1,6 @@
 import os
 import uuid
-import sqlite3
+import pymysql
 import logging
 from contextlib import contextmanager
 from typing import List, Optional
@@ -8,69 +8,118 @@ from typing import List, Optional
 from fastapi import HTTPException
 
 logger = logging.getLogger("BharatBot.db")
-DB_PATH = os.getenv("DB_PATH", "bharatbot.db")
 
+# AWS Task definition se direct MySQL URL milega, local fallback ke liye standard mysql string rakh di hai
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "mysql+pymysql://bharatbot_admin:SecureDbPass2026!@terraform-20260623161812694500000002.cd6264mcmeo4.us-east-1.rds.amazonaws.com:3306/bharatbotdb"
+)
+
+def parse_mysql_url(url: str):
+    """Parse standard database connection string into pymysql parameters."""
+    try:
+        # Removing driver prefix if present
+        if url.startswith("mysql+pymysql://"):
+            clean_url = url.replace("mysql+pymysql://", "")
+        else:
+            clean_url = url.replace("mysql://", "")
+            
+        auth, rest = clean_url.split("@")
+        user, password = auth.split(":")
+        host_port, db_name = rest.split("/")
+        
+        if ":" in host_port:
+            host, port = host_port.split(":")
+            port = int(port)
+        else:
+            host = host_port
+            port = 3306
+            
+        # Strip query parameters if any (e.g. ?charset=utf8mb4)
+        if "?" in db_name:
+            db_name = db_name.split("?")[0]
+            
+        return {
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": password,
+            "database": db_name,
+            "cursorclass": pymysql.cursors.DictCursor
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to parse DATABASE_URL: {e}")
+        raise RuntimeError("Invalid DATABASE_URL config format.")
+
+# Connection params config compilation
+DB_CONFIG = parse_mysql_url(DATABASE_URL)
+
+# MySQL specific DDL structure adjustments (TEXT to VARCHAR index scaling, datetime mapping)
 DDL = """
     CREATE TABLE IF NOT EXISTS users (
-        user_id         TEXT PRIMARY KEY,
-        name            TEXT NOT NULL,
-        email           TEXT NOT NULL UNIQUE,
-        password_hash   TEXT NOT NULL,
-        created_at      DATETIME DEFAULT (datetime('now', 'utc')),
-        updated_at      DATETIME DEFAULT (datetime('now', 'utc')),
-        is_active       INTEGER DEFAULT 1
+        user_id         VARCHAR(36) PRIMARY KEY,
+        name            VARCHAR(255) NOT NULL,
+        email           VARCHAR(255) NOT NULL UNIQUE,
+        password_hash   VARCHAR(255) NOT NULL,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        is_active       INT DEFAULT 1
     );
-    CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+"""
 
+DDL_INDEX_1 = "CREATE INDEX idx_users_email ON users (email);"
+
+DDL_REFRESH = """
     CREATE TABLE IF NOT EXISTS refresh_tokens (
-        jti             TEXT PRIMARY KEY,
-        user_id         TEXT NOT NULL,
-        token_hash      TEXT NOT NULL,
+        jti             VARCHAR(36) PRIMARY KEY,
+        user_id         VARCHAR(36) NOT NULL,
+        token_hash      VARCHAR(255) NOT NULL,
         expires_at      DATETIME NOT NULL,
-        revoked         INTEGER DEFAULT 0,
-        created_at      DATETIME DEFAULT (datetime('now', 'utc')),
+        revoked         INT DEFAULT 0,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens (user_id);
+"""
+DDL_INDEX_2 = "CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens (user_id);"
 
+DDL_SESSIONS = """
     CREATE TABLE IF NOT EXISTS sessions (
-        session_id  TEXT PRIMARY KEY,
-        user_id     TEXT NOT NULL,
-        created_at  DATETIME DEFAULT (datetime('now', 'utc')),
-        updated_at  DATETIME DEFAULT (datetime('now', 'utc')),
-        title       TEXT,
-        lang        TEXT DEFAULT 'en',
-        is_active   INTEGER DEFAULT 1,
+        session_id  VARCHAR(36) PRIMARY KEY,
+        user_id     VARCHAR(36) NOT NULL,
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        title       VARCHAR(255),
+        lang        VARCHAR(10) DEFAULT 'en',
+        is_active   INT DEFAULT 1,
         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id, is_active, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions (updated_at DESC);
+"""
+DDL_INDEX_3 = "CREATE INDEX idx_sessions_user_id ON sessions (user_id, is_active, updated_at DESC);"
+DDL_INDEX_4 = "CREATE INDEX idx_sessions_updated_at ON sessions (updated_at DESC);"
 
+DDL_MESSAGES = """
     CREATE TABLE IF NOT EXISTS messages (
-        message_id    TEXT PRIMARY KEY,
-        session_id    TEXT NOT NULL,
-        role          TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-        content_type  TEXT NOT NULL CHECK(content_type IN ('text', 'voice')),
+        message_id    VARCHAR(36) PRIMARY KEY,
+        session_id    VARCHAR(36) NOT NULL,
+        role          VARCHAR(20) NOT NULL CHECK(role IN ('user', 'assistant')),
+        content_type  VARCHAR(20) NOT NULL CHECK(content_type IN ('text', 'voice')),
         original_text TEXT,
         english_text  TEXT,
         response_text TEXT,
-        detected_lang TEXT,
-        audio_s3_uri  TEXT,
-        has_audio_out INTEGER DEFAULT 0,
-        created_at    DATETIME DEFAULT (datetime('now', 'utc')),
+        detected_lang VARCHAR(10),
+        audio_s3_uri  VARCHAR(512),
+        has_audio_out INT DEFAULT 0,
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages (session_id, created_at);
 """
+DDL_INDEX_5 = "CREATE INDEX idx_messages_session_id ON messages (session_id, created_at);"
 
 
 @contextmanager
 def get_db():
-    """Yield a WAL-mode SQLite connection and auto-commit/rollback."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
+    """Yield a dynamic PyMySQL connection with operational auto-commit block context."""
+    conn = pymysql.connect(**DB_CONFIG)
     try:
         yield conn
         conn.commit()
@@ -83,20 +132,42 @@ def get_db():
 
 def init_db() -> None:
     with get_db() as conn:
-        conn.executescript(DDL)
-    logger.info("✅ SQLite tables verified / created.")
+        with conn.cursor() as cursor:
+            # Running statements safely individually inside MySQL pipeline execution context
+            cursor.execute(DDL)
+            try:
+                cursor.execute(DDL_INDEX_1)
+            except Exception: pass # Skip if index already exists
+            
+            cursor.execute(DDL_REFRESH)
+            try:
+                cursor.execute(DDL_INDEX_2)
+            except Exception: pass
+            
+            cursor.execute(DDL_SESSIONS)
+            try:
+                cursor.execute(DDL_INDEX_3)
+                cursor.execute(DDL_INDEX_4)
+            except Exception: pass
+            
+            cursor.execute(DDL_MESSAGES)
+            try:
+                cursor.execute(DDL_INDEX_5)
+            except Exception: pass
+            
+    logger.info("✅ Remote AWS RDS MySQL database schema tables verified / initialized.")
 
 
 # ─── Row helpers ─────────────────────────────────────────────────────────────
 
-def get_session_or_404(conn: sqlite3.Connection, session_id: str, user_id: Optional[str] = None) -> sqlite3.Row:
-    """
-    Fetch a session by ID. If user_id is provided, also verify ownership (for user-scoped routes).
-    Raises 404 if not found or inactive.
-    """
-    row = conn.execute(
-        "SELECT * FROM sessions WHERE session_id = ? AND is_active = 1", (session_id,)
-    ).fetchone()
+def get_session_or_404(conn: pymysql.Connection, session_id: str, user_id: Optional[str] = None) -> dict:
+    """Fetch a session from RDS MySQL by ID. Raises 404/403 if conditions fail."""
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT * FROM sessions WHERE session_id = %s AND is_active = 1", (session_id,)
+        )
+        row = cursor.fetchone()
+        
     if not row:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
     if user_id and row["user_id"] != user_id:
@@ -104,39 +175,40 @@ def get_session_or_404(conn: sqlite3.Connection, session_id: str, user_id: Optio
     return row
 
 
-def fetch_session_history(conn: sqlite3.Connection, session_id: str, limit: int = 20) -> List[dict]:
-    rows = conn.execute(
-        """
-        SELECT role,
-               COALESCE(english_text, original_text) AS content
-        FROM   messages
-        WHERE  session_id = ?
-          AND  role IN ('user', 'assistant')
-          AND  content IS NOT NULL
-        ORDER  BY created_at DESC
-        LIMIT  ?
-        """,
-        (session_id, limit),
-    ).fetchall()
+def fetch_session_history(conn: pymysql.Connection, session_id: str, limit: int = 20) -> List[dict]:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT role,
+                   COALESCE(english_text, original_text) AS content
+            FROM   messages
+            WHERE  session_id = %s
+              AND  role IN ('user', 'assistant')
+              AND  content IS NOT NULL
+            ORDER  BY created_at DESC
+            LIMIT  %s
+            """,
+            (session_id, limit),
+        )
+        rows = cursor.fetchall()
     return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
 
 def get_assistant_message(
-    conn: sqlite3.Connection, session_id: str, message_id: str
-) -> sqlite3.Row:
-    """
-    Fetch a single assistant message row by (session_id, message_id).
-    Raises 404 if not found or not an assistant message.
-    """
-    row = conn.execute(
-        """
-        SELECT * FROM messages
-        WHERE  message_id = ?
-          AND  session_id = ?
-          AND  role       = 'assistant'
-        """,
-        (message_id, session_id),
-    ).fetchone()
+    conn: pymysql.Connection, session_id: str, message_id: str
+) -> dict:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT * FROM messages
+            WHERE  message_id = %s
+              AND  session_id = %s
+              AND  role       = 'assistant'
+            """,
+            (message_id, session_id),
+        )
+        row = cursor.fetchone()
+        
     if not row:
         raise HTTPException(
             status_code=404,
@@ -146,7 +218,7 @@ def get_assistant_message(
 
 
 def save_turn(
-    conn: sqlite3.Connection,
+    conn: pymysql.Connection,
     session_id: str,
     content_type: str,
     original_text: str,
@@ -156,104 +228,108 @@ def save_turn(
     audio_s3_uri: Optional[str] = None,
     has_audio_out: int = 0,
 ) -> None:
-    now_expr = "datetime('now', 'utc')"
-
     user_id = uuid.uuid4().hex
-    conn.execute(
-        f"""
-        INSERT INTO messages
-            (message_id, session_id, role, content_type,
-             original_text, english_text, detected_lang, audio_s3_uri)
-        VALUES (?, ?, 'user', ?, ?, ?, ?, ?)
-        """,
-        (user_id, session_id, content_type, original_text, english_text,
-         detected_lang, audio_s3_uri),
-    )
-
     asst_id = uuid.uuid4().hex
-    conn.execute(
-        f"""
-        INSERT INTO messages
-            (message_id, session_id, role, content_type,
-             original_text, english_text, response_text,
-             detected_lang, has_audio_out)
-        VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
-        """,
-        (asst_id, session_id, content_type, response_text, response_text,
-         response_text, detected_lang, has_audio_out),
-    )
 
-    conn.execute(
-        f"UPDATE sessions SET updated_at = {now_expr}, lang = ? WHERE session_id = ?",
-        (detected_lang, session_id),
-    )
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO messages
+                (message_id, session_id, role, content_type,
+                 original_text, english_text, detected_lang, audio_s3_uri)
+            VALUES (%s, %s, 'user', %s, %s, %s, %s, %s)
+            """,
+            (user_id, session_id, content_type, original_text, english_text,
+             detected_lang, audio_s3_uri),
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO messages
+                (message_id, session_id, role, content_type,
+                 original_text, english_text, response_text,
+                 detected_lang, has_audio_out)
+            VALUES (%s, %s, 'assistant', %s, %s, %s, %s, %s, %s)
+            """,
+            (asst_id, session_id, content_type, response_text, response_text,
+             response_text, detected_lang, has_audio_out),
+        )
+
+        cursor.execute(
+            "UPDATE sessions SET updated_at = NOW(), lang = %s WHERE session_id = %s",
+            (detected_lang, session_id),
+        )
 
 
 # ─── User helpers ────────────────────────────────────────────────────────────
 
-def get_user_by_email(conn: sqlite3.Connection, email: str) -> Optional[sqlite3.Row]:
-    """Fetch user by email, returns None if not found."""
-    return conn.execute(
-        "SELECT * FROM users WHERE email = ? AND is_active = 1", (email,)
-    ).fetchone()
+def get_user_by_email(conn: pymysql.Connection, email: str) -> Optional[dict]:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT * FROM users WHERE email = %s AND is_active = 1", (email,)
+        )
+        return cursor.fetchone()
 
 
-def get_user_by_id(conn: sqlite3.Connection, user_id: str) -> Optional[sqlite3.Row]:
-    """Fetch user by ID, returns None if not found."""
-    return conn.execute(
-        "SELECT * FROM users WHERE user_id = ? AND is_active = 1", (user_id,)
-    ).fetchone()
+def get_user_by_id(conn: pymysql.Connection, user_id: str) -> Optional[dict]:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT * FROM users WHERE user_id = %s AND is_active = 1", (user_id,)
+        )
+        return cursor.fetchone()
 
 
-def create_user(conn: sqlite3.Connection, name: str, email: str, password_hash: str) -> str:
-    """Create a new user, return user_id."""
+def create_user(conn: pymysql.Connection, name: str, email: str, password_hash: str) -> str:
     user_id = uuid.uuid4().hex
-    conn.execute(
-        """
-        INSERT INTO users (user_id, name, email, password_hash)
-        VALUES (?, ?, ?, ?)
-        """,
-        (user_id, name, email, password_hash),
-    )
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO users (user_id, name, email, password_hash)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (user_id, name, email, password_hash),
+        )
     return user_id
 
 
-def create_refresh_token(conn: sqlite3.Connection, user_id: str, token_hash: str, jti: str, expires_at: str) -> None:
-    """Store a hashed refresh token."""
-    conn.execute(
-        """
-        INSERT INTO refresh_tokens (jti, user_id, token_hash, expires_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        (jti, user_id, token_hash, expires_at),
-    )
+def create_refresh_token(conn: pymysql.Connection, user_id: str, token_hash: str, jti: str, expires_at: str) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO refresh_tokens (jti, user_id, token_hash, expires_at)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (jti, user_id, token_hash, expires_at),
+        )
 
 
-def get_refresh_token(conn: sqlite3.Connection, jti: str) -> Optional[sqlite3.Row]:
-    """Fetch refresh token by jti."""
-    return conn.execute(
-        "SELECT * FROM refresh_tokens WHERE jti = ?", (jti,)
-    ).fetchone()
+def get_refresh_token(conn: pymysql.Connection, jti: str) -> Optional[dict]:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT * FROM refresh_tokens WHERE jti = %s", (jti,)
+        )
+        return cursor.fetchone()
 
 
-def revoke_refresh_token(conn: sqlite3.Connection, jti: str) -> None:
-    """Mark a refresh token as revoked."""
-    conn.execute(
-        "UPDATE refresh_tokens SET revoked = 1 WHERE jti = ?", (jti,)
-    )
+def revoke_refresh_token(conn: pymysql.Connection, jti: str) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "UPDATE refresh_tokens SET revoked = 1 WHERE jti = %s", (jti,)
+        )
 
 
-def revoke_all_refresh_tokens(conn: sqlite3.Connection, user_id: str) -> None:
-    """Revoke all refresh tokens for a user (e.g., on password change)."""
-    conn.execute(
-        "UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?", (user_id,)
-    )
+def revoke_all_refresh_tokens(conn: pymysql.Connection, user_id: str) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "UPDATE refresh_tokens SET revoked = 1 WHERE user_id = %s", (user_id,)
+        )
 
 
-def update_user_password(conn: sqlite3.Connection, user_id: str, password_hash: str) -> None:
-    """Update user password hash and revoke all existing refresh tokens."""
-    conn.execute(
-        "UPDATE users SET password_hash = ?, updated_at = datetime('now', 'utc') WHERE user_id = ?",
-        (password_hash, user_id),
-    )
+def update_user_password(conn: pymysql.Connection, user_id: str, password_hash: str) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "UPDATE users SET password_hash = %s, updated_at = NOW() WHERE user_id = %s",
+            (password_hash, user_id),
+        )
     revoke_all_refresh_tokens(conn, user_id)
+    
