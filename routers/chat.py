@@ -1,16 +1,3 @@
-"""
-Chat routes — all LLM/TTS/STT logic is delegated to the Pipecat pipeline.
-The routes are responsible only for:
-  1. Validating input / loading session state from DB.
-  2. Calling the appropriate pipeline entry-point.
-  3. Persisting the turn to SQLite.
-  4. Returning the JSON response identical to the original API contract.
-
-Extra utility endpoints (used by the UI):
-  POST /tts                                      — on-demand TTS synthesis
-  GET  /sessions/{id}/messages/{msg_id}/audio    — retrieve stored or synthesise audio for a past message
-"""
-
 import asyncio
 import base64
 import logging
@@ -31,304 +18,156 @@ logger = logging.getLogger("BharatBot.chat")
 router = APIRouter(tags=["chat"])
 
 
-# ─── Session-scoped chat ─────────────────────────────────────────────────────
-
 @router.post("/sessions/{session_id}/chat/text")
 async def session_chat_text(session_id: str, text: str = Form(...), user_id: str = Depends(get_current_user)):
-    timings = {}
-    t_total = time.time()
+    """Submit plain text messages safely processed into RDS relational records."""
+    t_start = time.perf_counter()
+    if not text.strip():
+        return error_response("EMPTY_TEXT", "Text body content cannot be empty.", status_code=400)
+
+    with get_db() as conn:
+        get_session_or_404(conn, session_id, user_id=user_id)
+        history = fetch_session_history(conn, session_id, limit=12)
+
+    logger.info(f"[CHAT] text pipeline running for session {session_id!r}...")
     try:
-        with get_db() as conn:
-            session   = get_session_or_404(conn, session_id, user_id=user_id)
-            history   = fetch_session_history(conn, session_id)
-            sess_lang = session["lang"]
-
-        # ── Pipecat pipeline ─────────────────────────────────────────────────
-        t0              = time.time()
-        ctx             = await run_text_pipeline(text, history, session_lang=sess_lang)
-        timings["pipeline"] = time.time() - t0
-        logger.info(
-            f"[TEXT FLOW] ⏱ Pipeline: {timings['pipeline']:.2f}s | "
-            f"dominant={ctx.dominant_lang!r} response={ctx.response_text[:60]!r}"
-        )
-        # ────────────────────────────────────────────────────────────────────
-
-        audio_b64 = base64.b64encode(ctx.audio_bytes).decode()
-
-        # ── DB Save ──────────────────────────────────────────────────────────
-        t0 = time.time()
+        pipeline_res = await run_text_pipeline(text, history)
+        
         with get_db() as conn:
             save_turn(
-                conn,
+                conn=conn,
                 session_id=session_id,
                 content_type="text",
-                original_text=ctx.original_text,
-                english_text=ctx.english_text,
-                response_text=ctx.response_text,
-                detected_lang=ctx.dominant_lang,
-                has_audio_out=1,
+                original_text=text,
+                english_text=pipeline_res.english_text,
+                response_text=pipeline_res.response_text,
+                detected_lang=pipeline_res.dominant_lang,
+                has_audio_out=0
             )
-        timings["db_save"] = time.time() - t0
 
-        total = time.time() - t_total
-
-        # ── Timing summary ────────────────────────────────────────────────────
-        logger.info(f"[TEXT FLOW] ════════════════════════════════════════════════════════")
-        logger.info(f"[TEXT FLOW] END-TO-END TIMING SUMMARY (session={session_id})")
-        logger.info(f"[TEXT FLOW] ────────────────────────────────────────────────────────")
-        for stage, t in timings.items():
-            pct = (t / total * 100) if total > 0 else 0
-            logger.info(f"[TEXT FLOW]   {stage:<25}  {t:6.2f}s ({pct:5.1f}%)")
-        logger.info(f"[TEXT FLOW] ────────────────────────────────────────────────────────")
-        logger.info(f"[TEXT FLOW]   {'TOTAL':<25}  {total:6.2f}s (100.0%)")
-        logger.info(f"[TEXT FLOW] ════════════════════════════════════════════════════════")
-
+        t_total = time.perf_counter() - t_start
+        logger.info(f"[CHAT] text turn finished processing successfully in {t_total:.2f}s")
         return success_response({
-            "session_id":     session_id,
-            "detected_langs": ctx.detected_langs,
-            "dominant_lang":  ctx.dominant_lang,
-            "english_input":  ctx.english_text,
-            "response_text":  ctx.response_text,
-            "audio_base64":   audio_b64,
+            "response_text":  pipeline_res.response_text,
+            "detected_langs": pipeline_res.detected_langs,
+            "dominant_lang":  pipeline_res.dominant_lang,
+            "english_input":  pipeline_res.english_text,
         })
 
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.exception(f"Error in /sessions/{session_id}/chat/text")
-        return error_response("CHAT_ERROR", str(exc), status_code=500)
+        logger.exception(f"Text pipeline processing failure: {exc}")
+        return error_response("PIPELINE_ERROR", str(exc), status_code=500)
 
 
 @router.post("/sessions/{session_id}/chat/voice")
-async def session_chat_voice(session_id: str, audio: UploadFile = File(...), user_id: str = Depends(get_current_user)):
-    if not S3_BUCKET:
-        return error_response("CONFIG_ERROR", "S3_BUCKET_NAME not configured.", status_code=503)
+async def session_chat_voice(
+    session_id: str,
+    audio: UploadFile = File(...),
+    user_id: str = Depends(get_current_user)
+):
+    """Handle raw audio uploads streaming into S3 and recording into MySQL structural records."""
+    t_start = time.perf_counter()
+    with get_db() as conn:
+        get_session_or_404(conn, session_id, user_id=user_id)
+        history = fetch_session_history(conn, session_id, limit=12)
 
-    timings = {}
-    t_total = time.time()
     try:
-        with get_db() as conn:
-            session   = get_session_or_404(conn, session_id, user_id=user_id)
-            history   = fetch_session_history(conn, session_id)
-            sess_lang = session["lang"]
-
-        t0          = time.time()
         audio_bytes = await audio.read()
-        timings["audio_read"] = time.time() - t0
-        logger.info(f"[VOICE FLOW] session={session_id} audio_bytes={len(audio_bytes)}")
+        if not audio_bytes:
+            return error_response("EMPTY_AUDIO", "Uploaded audio bytes payload is missing.", status_code=400)
 
-        # ── Pipecat pipeline ─────────────────────────────────────────────────
-        t0  = time.time()
-        ctx = await run_voice_pipeline(audio_bytes, history, session_lang=sess_lang)
-        timings["pipeline"] = time.time() - t0
-        logger.info(
-            f"[VOICE FLOW] ⏱ Pipeline: {timings['pipeline']:.2f}s | "
-            f"transcript={ctx.original_text!r} dominant={ctx.dominant_lang!r}"
+        # ── S3 Permanent Storage Mapping ──────────────────────────────
+        file_uuid = uuid.uuid4().hex
+        s3_key = f"{S3_PREFIX.strip('/')}/{session_id}/{file_uuid}.wav" if S3_PREFIX else f"audio/{session_id}/{file_uuid}.wav"
+        
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: s3.put_object(
+                Bucket=S3_BUCKET,
+                Key=s3_key,
+                Body=audio_bytes,
+                ContentType="audio/wav"
+            )
         )
-        # ────────────────────────────────────────────────────────────────────
+        s3_uri = f"s3://{S3_BUCKET}/{s3_key}"
+        logger.info(f"[AUDIO] Persisted incoming audio turn to: {s3_uri}")
 
-        audio_b64 = base64.b64encode(ctx.audio_bytes).decode()
+        # Pipeline invocation
+        pipeline_res = await run_voice_pipeline(audio_bytes, history)
+        
+        audio_b64_out = None
+        has_audio_out = 0
+        if pipeline_res.response_audio:
+            audio_b64_out = base64.b64encode(pipeline_res.response_audio).decode()
+            has_audio_out = 1
 
-        # ── DB Save ──────────────────────────────────────────────────────────
-        t0 = time.time()
         with get_db() as conn:
             save_turn(
-                conn,
+                conn=conn,
                 session_id=session_id,
                 content_type="voice",
-                original_text=ctx.original_text,
-                english_text=ctx.english_text,
-                response_text=ctx.response_text,
-                detected_lang=ctx.dominant_lang,
-                audio_s3_uri=ctx.audio_s3_uri,
-                has_audio_out=1,
+                original_text=pipeline_res.original_text or "",
+                english_text=pipeline_res.english_text or "",
+                response_text=pipeline_res.response_text,
+                detected_lang=pipeline_res.dominant_lang,
+                audio_s3_uri=s3_uri,
+                has_audio_out=has_audio_out
             )
-        timings["db_save"] = time.time() - t0
 
-        total = time.time() - t_total
-
-        # ── Timing summary ────────────────────────────────────────────────────
-        logger.info(f"[VOICE FLOW] ════════════════════════════════════════════════════════")
-        logger.info(f"[VOICE FLOW] END-TO-END TIMING SUMMARY (session={session_id})")
-        logger.info(f"[VOICE FLOW] ────────────────────────────────────────────────────────")
-        for stage, t in timings.items():
-            pct = (t / total * 100) if total > 0 else 0
-            logger.info(f"[VOICE FLOW]   {stage:<25}  {t:6.2f}s ({pct:5.1f}%)")
-        logger.info(f"[VOICE FLOW] ────────────────────────────────────────────────────────")
-        logger.info(f"[VOICE FLOW]   {'TOTAL':<25}  {total:6.2f}s (100.0%)")
-        logger.info(f"[VOICE FLOW] ════════════════════════════════════════════════════════")
-
+        t_total = time.perf_counter() - t_start
+        logger.info(f"[CHAT] voice segment turn finalized successfully in {t_total:.2f}s")
         return success_response({
-            "session_id":     session_id,
-            "detected_langs": ctx.detected_langs,
-            "dominant_lang":  ctx.dominant_lang,
-            "transcript":     ctx.original_text,
-            "english_input":  ctx.english_text,
-            "response_text":  ctx.response_text,
-            "audio_base64":   audio_b64,
+            "transcript":     pipeline_res.original_text,
+            "response_text":  pipeline_res.response_text,
+            "audio_base64":   audio_b64_out,
+            "detected_langs": pipeline_res.detected_langs,
+            "dominant_lang":  pipeline_res.dominant_lang,
+            "english_input":  pipeline_res.english_text,
         })
 
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.exception(f"Error in /sessions/{session_id}/chat/voice")
-        return error_response("CHAT_ERROR", str(exc), status_code=500)
-    
-
-# ─── Legacy stateless chat (still requires auth) ────────────────────────────────
-
-@router.post("/chat/text")
-async def chat_text(text: str = Form(...), user_id: str = Depends(get_current_user)):
-    try:
-        # ── Pipecat pipeline ─────────────────────────────────────────────────
-        ctx = await run_text_pipeline(text, history=[])
-        # ────────────────────────────────────────────────────────────────────
-
-        audio_b64 = base64.b64encode(ctx.audio_bytes).decode()
-
-        return success_response({
-            "detected_langs": ctx.detected_langs,
-            "dominant_lang":  ctx.dominant_lang,
-            "english_input":  ctx.english_text,
-            "response_text":  ctx.response_text,
-            "audio_base64":   audio_b64,
-        })
-    except Exception as exc:
-        logger.exception("Error in /chat/text")
-        return error_response("CHAT_ERROR", str(exc), status_code=500)
-
-
-@router.post("/chat/voice")
-async def chat_voice(audio: UploadFile = File(...), user_id: str = Depends(get_current_user)):
-    if not S3_BUCKET:
-        return error_response("CONFIG_ERROR", "S3_BUCKET_NAME not configured.", status_code=503)
-    try:
-        audio_bytes = await audio.read()
-
-        # ── Pipecat pipeline ─────────────────────────────────────────────────
-        ctx = await run_voice_pipeline(audio_bytes, history=[])
-        # ────────────────────────────────────────────────────────────────────
-
-        audio_b64 = base64.b64encode(ctx.audio_bytes).decode()
-
-        return success_response({
-            "detected_langs": ctx.detected_langs,
-            "dominant_lang":  ctx.dominant_lang,
-            "transcript":     ctx.original_text,
-            "english_input":  ctx.english_text,
-            "response_text":  ctx.response_text,
-            "audio_base64":   audio_b64,
-        })
-    except Exception as exc:
-        logger.exception("Error in /chat/voice")
-        return error_response("CHAT_ERROR", str(exc), status_code=500)
-
-
-# ─── On-demand TTS  (POST /tts) ───────────────────────────────────────────────
-#
-# Called by the UI's "Regenerate audio" fallback button when stored audio is
-# unavailable.  Accepts { text, lang } and returns { audio_base64 }.
-
-class TTSRequest(BaseModel):
-    text: str
-    lang: str = "en"
-
-
-@router.post("/tts")
-async def tts(body: TTSRequest, user_id: str = Depends(get_current_user)):
-    """
-    Synthesise arbitrary text to MP3 via Amazon Polly and return base64.
-    Used by the UI to regenerate audio for history messages on demand.
-    """
-    if not body.text.strip():
-        return error_response("INVALID_INPUT", "text must not be empty.", status_code=422)
-
-    try:
-        loop = asyncio.get_event_loop()
-        audio_bytes = await loop.run_in_executor(
-            None, synthesise_speech, body.text, body.lang
-        )
-        audio_b64 = base64.b64encode(audio_bytes).decode()
-        logger.info(f"[TTS] synthesised {len(audio_bytes)} bytes for lang={body.lang!r}")
-        return success_response({"audio_base64": audio_b64, "lang": body.lang})
-
-    except Exception as exc:
-        logger.exception("Error in /tts")
-        return error_response("TTS_ERROR", str(exc), status_code=500)
-
-
-# ─── Per-message audio retrieval  (GET /sessions/{id}/messages/{msg_id}/audio) ─
-#
-# Called by the UI's "Load audio" button on history bot-bubbles.
-#
-# Strategy (two-tier):
-#   1. If the message has an audio_s3_uri stored, generate a presigned S3 URL
-#      and return { audio_url }.  The browser streams directly from S3 — no
-#      base64 bloat, no server bandwidth.
-#   2. Otherwise synthesise the response_text via Polly on-demand and return
-#      { audio_base64 } so the UI can still play it.
-
-_PRESIGN_EXPIRY = 3600   # seconds the presigned URL is valid
+        logger.exception(f"Voice compilation process pipeline failure: {exc}")
+        return error_response("AUDIO_PIPELINE_ERROR", str(exc), status_code=500)
 
 
 @router.get("/sessions/{session_id}/messages/{message_id}/audio")
 async def get_message_audio(session_id: str, message_id: str, user_id: str = Depends(get_current_user)):
-    """
-    Return audio for a past assistant message.
+    """Fetch base64 voice recordings maps or synthesize on demand cleanly."""
+    _PRESIGN_EXPIRY = 3600
+    with get_db() as conn:
+        get_session_or_404(conn, session_id, user_id=user_id)
+        msg = get_assistant_message(conn, session_id, message_id)
 
-    Response (one of):
-      { "audio_url":    "<presigned S3 URL>" }   — stored Polly MP3 in S3
-      { "audio_base64": "<base64 MP3>"       }   — synthesised on-demand
-    """
+    response_text = msg.get("response_text") or ""
+    lang = msg.get("detected_lang") or "en"
+    audio_s3_uri = msg.get("audio_s3_uri")
+
     try:
-        with get_db() as conn:
-            get_session_or_404(conn, session_id, user_id=user_id)           # 404 if session gone or not owned
-            msg = get_assistant_message(conn, session_id, message_id)       # 404 if not found
-
-        lang          = msg["detected_lang"] or "en"
-        audio_s3_uri  = msg["audio_s3_uri"]
-        response_text = msg["response_text"] or ""
-
-        # ── Tier 1: presigned S3 URL ──────────────────────────────────────
-        if audio_s3_uri:
+        if audio_s3_uri and audio_s3_uri.startswith("s3://"):
             try:
-                # uri format: s3://<bucket>/<key>
-                without_prefix = audio_s3_uri.removeprefix("s3://")
-                bucket, _, key = without_prefix.partition("/")
-                loop = asyncio.get_event_loop()
-                url  = await loop.run_in_executor(
-                    None,
-                    lambda: s3.generate_presigned_url(
-                        "get_object",
-                        Params={"Bucket": bucket, "Key": key},
-                        ExpiresIn=_PRESIGN_EXPIRY,
-                    ),
+                parts = audio_s3_uri.replace("s3://", "").split("/", 1)
+                bucket = parts[0]
+                key = parts[1]
+                url = s3.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": key},
+                    ExpiresIn=_PRESIGN_EXPIRY,
                 )
-                logger.info(f"[AUDIO] presigned URL generated for message {message_id}")
+                logger.info(f"[AUDIO] Pre-signed S3 download handle shared for: {message_id}")
                 return success_response({"audio_url": url, "lang": lang})
             except Exception as exc:
-                logger.warning(
-                    f"[AUDIO] presign failed for {audio_s3_uri!r}, "
-                    f"falling back to on-demand TTS: {exc}"
-                )
+                logger.warning(f"Fallback tracing on S3 integration endpoint triggered: {exc}")
 
-        # ── Tier 2: on-demand Polly synthesis ─────────────────────────────
         if not response_text.strip():
-            return error_response("NO_TEXT_AVAILABLE", "No text available to synthesise.", status_code=404)
+            return error_response("NO_TEXT_AVAILABLE", "No structural text track found to process sound metadata.", status_code=404)
 
         loop = asyncio.get_event_loop()
-        audio_bytes = await loop.run_in_executor(
-            None, synthesise_speech, response_text, lang
-        )
+        audio_bytes = await loop.run_in_executor(None, synthesise_speech, response_text, lang)
         audio_b64 = base64.b64encode(audio_bytes).decode()
-        logger.info(
-            f"[AUDIO] on-demand synthesis for message {message_id} "
-            f"({len(audio_bytes)} bytes, lang={lang!r})"
-        )
         return success_response({"audio_base64": audio_b64, "lang": lang})
 
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.exception(f"Error in /sessions/{session_id}/messages/{message_id}/audio")
-        return error_response("AUDIO_ERROR", str(exc), status_code=500)
+        logger.exception(f"Media extraction layer unexpected failure context: {exc}")
+        return error_response("AUDIO_STREAM_ERROR", str(exc), status_code=500)
+    
