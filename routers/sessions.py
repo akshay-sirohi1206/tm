@@ -123,7 +123,7 @@ async def get_session_messages(
                        response_text, detected_lang, has_audio_out, created_at
                 FROM   messages
                 WHERE  session_id = %s
-                ORDER  BY created_at ASC
+                ORDER  BY created_at ASC, role DESC
                 LIMIT  %s OFFSET %s
                 """,
                 (session_id, limit, offset),

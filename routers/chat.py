@@ -99,8 +99,8 @@ async def session_chat_voice(
         
         audio_b64_out = None
         has_audio_out = 0
-        if pipeline_res.response_audio:
-            audio_b64_out = base64.b64encode(pipeline_res.response_audio).decode()
+        if pipeline_res.audio_bytes:
+            audio_b64_out = base64.b64encode(pipeline_res.audio_bytes).decode()
             has_audio_out = 1
 
         with get_db() as conn:

@@ -141,7 +141,7 @@ async def logout(body: RefreshTokenRequest, user_id: str = Depends(get_current_u
         with get_db() as conn:
             revoke_refresh_token(conn, jti)
     logger.info(f"[AUTH] Logged out session jti: {jti}")
-    return success_response(message="Logged out successfully.")
+    return success_response(data={"message": "Logged out successfully."})
 
 
 @router.get("/me")
